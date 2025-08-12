@@ -7,6 +7,7 @@ import React, {
   memo,
   Suspense,
   lazy,
+  useLayoutEffect,
 } from "react";
 import useGlobalStore from "@/stores/globalStore";
 import useSockets from "@/stores/useSockets";
@@ -48,6 +49,7 @@ const ChatBox = ({
   const { rooms } = useSockets((state) => state);
   const { selectedRoom, setter } = useGlobalStore((state) => state) || {};
   const { _id: roomID, messages, type } = selectedRoom!;
+
   const {
     _id: myID,
     name: myName,
@@ -70,11 +72,12 @@ const ChatBox = ({
     }
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setter({ isChatPageLoaded: true });
     return () => {
       setIsLoaded(false);
       setTypings([]);
+
       rooms?.emit("updateLastMsgPos", {
         roomID: _id,
         scrollPos: lastScrollPos.current,
@@ -82,15 +85,6 @@ const ChatBox = ({
       });
     };
   }, [roomID, _id, rooms, myID, setter, setIsLoaded, setTypings]);
-
-  useEffect(() => {
-    const track = roomMessageTrack?.find((track) => track.roomId === _id);
-    setTimeout(() => {
-      if (track && messageContainerRef.current) {
-        messageContainerRef.current.scrollTop = track.scrollPos;
-      }
-    }, 100);
-  }, [_id, roomMessageTrack]);
 
   const checkIsLastMsgInView = useCallback(
     (e: React.UIEvent<HTMLDivElement>) => {
@@ -112,13 +106,13 @@ const ChatBox = ({
     isLastMsgInView,
   });
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     manageScroll();
   }, [manageScroll]);
 
   const markAsLoaded = useCallback(() => setIsLoaded(true), [setIsLoaded]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!isLoaded && _id && messages?.length) {
       const lastSeenMsg = [...messages]
         .reverse()
@@ -138,7 +132,21 @@ const ChatBox = ({
     }
   }, [messages, isLoaded, myID, _id, markAsLoaded]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    const track = roomMessageTrack?.find((track) => track.roomId === _id);
+
+    if (track && messageContainerRef.current) {
+      // Use MutationObserver to ensure scroll position is set after content loads
+      if (
+        messageContainerRef.current &&
+        messageContainerRef.current.scrollHeight > 0
+      ) {
+        messageContainerRef.current.scrollTop = track.scrollPos;
+      }
+    }
+  }, [_id, roomMessageTrack]);
+
+  useLayoutEffect(() => {
     const handleBeforeUnload = () => {
       rooms?.emit("updateLastMsgPos", {
         roomID,
@@ -255,17 +263,17 @@ const ChatBox = ({
           {floatingDate}
         </div>
 
-        <Suspense>
-          <MessageList
-            messages={messages}
-            myID={myID}
-            type={type}
-            lastMsgRef={lastMsgRef}
-            setEditData={setEditData}
-            setReplayData={setReplayData}
-            pinMessage={pinMessage}
-          />
-        </Suspense>
+        {/* <Suspense> */}
+        <MessageList
+          messages={messages}
+          myID={myID}
+          type={type}
+          lastMsgRef={lastMsgRef}
+          setEditData={setEditData}
+          setReplayData={setReplayData}
+          pinMessage={pinMessage}
+        />
+        {/* </Suspense> */}
 
         <ScrollToBottom
           count={notSeenMessages}
