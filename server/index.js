@@ -202,11 +202,17 @@ io.on("connection", (socket) => {
 
   socket.on("seenMsg", async (seenData) => {
     io.to(seenData.roomID).emit("seenMsg", seenData);
-
     try {
       await MessageSchema.findOneAndUpdate(
         { _id: seenData.msgID },
-        { $push: { seen: seenData.seenBy } }
+        {
+          $push: {
+            seen: seenData.seenBy,
+          },
+          $set: {
+            readTime: new Date(seenData.readTime),
+          },
+        }
       );
     } catch (error) {
       console.log(error);
