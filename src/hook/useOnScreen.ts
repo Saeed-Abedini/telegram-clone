@@ -1,21 +1,38 @@
-import { useState, useEffect } from "react";
+import { RefObject, useEffect, useMemo } from "react";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const useOnScreen = (ref: any) => {
-  const [isIntersecting, setIntersecting] = useState(false);
+export const useOnScreen = (
+  ref: RefObject<HTMLDivElement | null>,
+  onIntersect: (isIntersecting: boolean) => void
+) => {
+  const observer = useMemo(() => {
+    return new IntersectionObserver(
+      ([entry]) => {
+        onIntersect(entry.isIntersecting);
+      },
+      {
+        threshold: 1.0,
+      }
+    );
+
+  }, [onIntersect]);
 
   useEffect(() => {
-    const observer = new IntersectionObserver(([entry]) => {
-      setIntersecting(entry.isIntersecting);
-    });
+    const currentElement = ref.current;
 
-    if (ref.current) observer.observe(ref.current);
+    if (currentElement) {
+      observer.observe(currentElement);
+    }
 
     return () => {
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-      if (ref.current) observer.unobserve(ref.current);
+      if (currentElement) {
+        observer.unobserve(currentElement);
+      }
     };
-  }, [ref]);
+  }, [ref, observer]);
 
-  return isIntersecting;
+  useEffect(() => {
+    return () => {
+      observer.disconnect();
+    };
+  }, [observer]);
 };
