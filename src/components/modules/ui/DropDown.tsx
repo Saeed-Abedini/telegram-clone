@@ -1,7 +1,7 @@
 import useModalStore from "@/stores/modalStore";
 import { CSSProperties, ReactNode, useEffect, useRef } from "react";
 export interface DropDownItemProps {
-  onClick: () => void;
+  onClick?: () => void;
   title: string | ReactNode;
   icon: ReactNode;
   itemClassNames?: string;
@@ -39,11 +39,11 @@ const DropDown = ({
       }
     };
 
-    document.addEventListener("click", handleOutside);
+    document.addEventListener("mouseup", handleOutside);
     document.addEventListener("scroll", handleOutside, true);
 
     return () => {
-      document.removeEventListener("click", handleOutside);
+      document.removeEventListener("mouseup", handleOutside);
       document.removeEventListener("scroll", handleOutside, true);
     };
   }, [modalOpen, setIsOpen]);
@@ -70,7 +70,7 @@ const DropDown = ({
             ({ onClick, title, icon, itemClassNames }, index) => (
               <li
                 className={`font-vazirLight text-sm cursor-pointer hover:bg-leftBarBg/[10%] flex items-center gap-4 px-2 py-2 ${itemClassNames}`}
-                onMouseDown={onClick}
+                onClick={onClick}
                 key={index}
               >
                 <span className="mb-1">{icon}</span>
