@@ -58,8 +58,6 @@ const Message = memo((msgData: MessageModel & Props) => {
   const selectedRoom = useGlobalStore((state) => state.selectedRoom);
   const [isInViewport, setIsInViewport] = useState<boolean>(false);
   useOnScreen(messageRef, setIsInViewport);
-  // console.log("Message component re-rendered for message ID:", _id);
-  console.log("message.tsx");
 
   //Calculate whether the message is the last message from the current sender.
   const isLastMessageFromUser = useMemo(
