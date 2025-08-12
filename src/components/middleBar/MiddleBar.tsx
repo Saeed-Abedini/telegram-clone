@@ -2,7 +2,7 @@
 import useGlobalStore from "@/stores/globalStore";
 import { lazy, Suspense } from "react";
 import Loading from "../modules/ui/Loading";
-import AudioManager from "./AudioManager";
+import AudioManager from "./voice/AudioManager";
 
 const ChatPage = lazy(() => import("./ChatPage"));
 

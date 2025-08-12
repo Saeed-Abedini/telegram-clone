@@ -11,11 +11,15 @@ interface AudioFile {
 }
 
 const AudioManager = () => {
-  const { isPlaying, setter, voiceData, downloadedAudios } = useAudio(
+  const { isPlaying, setter, voiceData, downloadedAudios, setAudioElement } = useAudio(
     (state) => state
   );
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement>(new Audio());
   const animationFrameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    setAudioElement(audioRef.current);
+  }, [setAudioElement]);
 
   const isVoiceFileReadyToPlay = useMemo(() => {
     return downloadedAudios.some(
@@ -31,19 +35,32 @@ const AudioManager = () => {
   }, [isPlaying]);
 
   useEffect(() => {
-    if (isPlaying && isVoiceFileReadyToPlay) {
-      setter({ audioElem: audioRef.current, isPlaying: true });
-      audioRef.current?.play();
-    }
-  }, [isPlaying, isVoiceFileReadyToPlay, setter]);
-
-  useEffect(() => {
     if (!audioRef.current) return;
 
-    const audio = audioRef.current as HTMLAudioElement;
+    const audio = audioRef.current;
 
-    const handleEnded = () => {
-      setter({ isPlaying: false, voiceData: null });
+    if (voiceData && audio.src !== voiceData.src) {
+      audio.pause();
+      audio.currentTime = 0;
+      audio.src = voiceData.src;
+      audio.load();
+    }
+
+    if (isPlaying && isVoiceFileReadyToPlay) {
+      audio.play();
+    } else if (!isPlaying && !audio.paused) {
+      audio.pause();
+    }
+
+    const handleCanPlayThrough = () => {
+      setter((prev: { downloadedAudios: AudioFile[]; isPlaying: boolean }) => ({
+        downloadedAudios: prev.downloadedAudios.map((audio: AudioFile) =>
+          audio._id === voiceData?._id
+            ? { ...audio, downloaded: true, isDownloading: false }
+            : audio
+        ),
+        isPlaying: true,
+      }));
     };
 
     const handleError = () => {
@@ -62,28 +79,16 @@ const AudioManager = () => {
       });
     };
 
-    const handleCanPlayThrough = () => {
-      setter((prev: { downloadedAudios: AudioFile[]; isPlaying: boolean }) => ({
-        downloadedAudios: prev.downloadedAudios.map((audio: AudioFile) =>
-          audio._id === voiceData?._id
-            ? { ...audio, downloaded: true, isDownloading: false }
-            : audio
-        ),
-        isPlaying: true,
-      }));
-      audio.play();
-    };
-
-    audio.addEventListener("ended", handleEnded);
-    audio.addEventListener("error", handleError);
     audio.addEventListener("canplaythrough", handleCanPlayThrough);
+    audio.addEventListener("error", handleError);
 
     return () => {
-      audio.removeEventListener("ended", handleEnded);
-      audio.removeEventListener("error", handleError);
       audio.removeEventListener("canplaythrough", handleCanPlayThrough);
+      audio.removeEventListener("error", handleError);
     };
-  }, [voiceData?._id, downloadedAudios, setter]);
+  }, [isPlaying, isVoiceFileReadyToPlay, voiceData, setter, downloadedAudios]);
+
+
 
   useEffect(() => {
     if (!audioRef.current) return;
@@ -111,15 +116,7 @@ const AudioManager = () => {
     };
   }, [isPlaying, setter]);
 
-  return voiceData ? (
-    <audio
-      key={voiceData._id}
-      ref={audioRef}
-      className="hidden"
-      src={voiceData.src}
-      controls={false}
-    ></audio>
-  ) : null;
+  return null;
 };
 
 export default AudioManager;

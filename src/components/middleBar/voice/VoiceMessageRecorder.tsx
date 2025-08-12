@@ -5,7 +5,7 @@ import useSockets from "@/stores/useSockets";
 import { secondsToTimeString, toaster, uploadFile } from "@/utils";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { PiMicrophoneLight } from "react-icons/pi";
-import Loading from "../modules/ui/Loading";
+import Loading from "../../modules/ui/Loading";
 import { RiSendPlaneFill } from "react-icons/ri";
 
 interface Props {
