@@ -3,7 +3,7 @@ import { IoMdClose } from "react-icons/io";
 import { ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
 import { MdAttachFile, MdModeEditOutline, MdOutlineDone } from "react-icons/md";
 import { BsFillReplyFill } from "react-icons/bs";
-import VoiceMessageRecorder from "./VoiceMessageRecorder";
+import VoiceMessageRecorder from "./voice/VoiceMessageRecorder";
 import Message from "@/models/message";
 import useGlobalStore from "@/stores/globalStore";
 import useUserStore from "@/stores/userStore";
@@ -152,6 +152,13 @@ const MessageInput = ({
     setText((prev) => prev + e.emoji);
   }, []);
 
+  //Close keyBoard after open emoji
+  useEffect(() => {
+    if (isEmojiOpen) {
+      document.getElementById("myInputField")?.blur();
+    }
+  }, [isEmojiOpen]);
+
   //Updating text in edit mode
   useEffect(() => {
     if (editData?.message) {
@@ -285,6 +292,7 @@ const MessageInput = ({
             )}
             <textarea
               dir="auto"
+              autoComplete="offtextarea"
               value={text}
               onChange={handleTextChange}
               onContextMenu={(e) => e.stopPropagation()}
