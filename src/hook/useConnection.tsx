@@ -117,7 +117,7 @@ const useConnection = ({
       if (roomID === selectedRoom?._id) setter({ selectedRoom: null });
     });
 
-    socket.on("seenMsg", ({ roomID, seenBy }) => {
+    socket.on("seenMsg", ({ roomID, seenBy, readTime }) => {
       setRooms((prevRooms) =>
         prevRooms.map((room) => {
           if (room._id === roomID) {
@@ -126,6 +126,7 @@ const useConnection = ({
               lastMsgData: {
                 ...room.lastMsgData!,
                 seen: [...new Set([...(room.lastMsgData?.seen || []), seenBy])],
+                readTime,
               },
             };
           }
