@@ -2,6 +2,8 @@ const formatDate = (inputDate: string) => {
   if (!inputDate) return "";
 
   const dateObj = new Date(inputDate);
+  if (isNaN(dateObj.getTime())) return "";
+
   const now = new Date();
 
   if (dateObj.toDateString() === now.toDateString()) {
