@@ -4,7 +4,8 @@ export const schema = new Schema(
   {
     sender: { type: mongoose.Types.ObjectId, required: true, ref: "User" },
     message: { type: String },
-    seen: [{ type: Schema.ObjectId, ref: "User", required: true, default: [] }],
+    seen: [{ type: Schema.ObjectId, required: true, default: [] }],
+    readTime: { type: Date },
     replays: [
       { type: Schema.ObjectId, ref: "Message", required: true, default: [] },
     ],
