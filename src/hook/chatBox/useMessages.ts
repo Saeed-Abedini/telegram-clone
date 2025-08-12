@@ -91,20 +91,31 @@ const useMessages = ({
     const handleSeenMsg = ({
       msgID,
       seenBy,
+      readTime,
     }: {
       msgID: string;
       seenBy: string;
+      readTime: Date;
     }) => {
-      setter((prev) => ({
-        selectedRoom: {
-          ...prev.selectedRoom!,
-          messages: (prev.selectedRoom?.messages || []).map((msg) =>
-            msg._id === msgID
-              ? { ...msg, seen: [...new Set([...msg.seen, seenBy])] }
-              : msg
-          ),
-        },
-      }));
+      setter(
+        (prev): Partial<GlobalStoreProps> => ({
+          selectedRoom: prev.selectedRoom
+            ? {
+                ...(prev.selectedRoom ?? {}),
+                messages: (prev.selectedRoom?.messages ?? []).map(
+                  (msg: Message) =>
+                    msg._id === msgID
+                      ? {
+                          ...msg,
+                          seen: [...new Set([...msg.seen, seenBy])],
+                          readTime,
+                        }
+                      : msg
+                ),
+              }
+            : null,
+        })
+      );
     };
 
     rooms?.on("newMessage", handleNewMessage);
