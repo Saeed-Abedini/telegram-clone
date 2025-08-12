@@ -1,25 +1,17 @@
 import { useOnScreen } from "@/hook/useOnScreen";
-import {
-  dateString,
-  getTimeFromDate,
-  scrollToMessage,
-  secondsToTimeString,
-} from "@/utils";
-import { FaPlay } from "react-icons/fa";
-import { FaPause, FaArrowDown } from "react-icons/fa6";
-import { IoClose, IoEye } from "react-icons/io5";
+import { dateString, getTimeFromDate, scrollToMessage } from "@/utils";
+import { IoEye } from "react-icons/io5";
 import { TiPin } from "react-icons/ti";
 import Image from "next/image";
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import MessageActions from "./MessageActions";
 import MessageModel from "@/models/message";
 import Voice from "@/models/voice";
 import useSockets from "@/stores/useSockets";
-import useAudio from "@/stores/audioStore";
+import VoiceMessagePlayer from "./voice/VoiceMessagePlayer";
 import { IoMdCheckmark } from "react-icons/io";
 import useModalStore from "@/stores/modalStore";
 import useGlobalStore from "@/stores/globalStore";
-import Loading from "../modules/ui/Loading";
 import ProfileGradients from "../modules/ProfileGradients";
 
 interface Props {
@@ -33,7 +25,7 @@ interface Props {
   nextMessage: MessageModel;
 }
 
-const Message = (msgData: MessageModel & Props) => {
+const Message = memo((msgData: MessageModel & Props) => {
   const {
     createdAt,
     message,
@@ -54,17 +46,20 @@ const Message = (msgData: MessageModel & Props) => {
   } = msgData;
 
   const [isMounted, setIsMounted] = useState(false);
-  const [voiceCurrentTime, setVoiceCurrentTime] = useState(0);
 
   const messageRef = useRef<HTMLDivElement | null>(null);
-  const animationRef = useRef<number | null>(null);
 
-  const { rooms } = useSockets((state) => state);
-  const { setter: modalSetter, msgData: modalMsgData } = useModalStore(
-    (state) => state
+  const rooms = useSockets((state) => state.rooms);
+  const modalSetter = useModalStore((state) => state.setter);
+  const isThisMessageSelected = useModalStore(
+    useCallback((state) => state.msgData?._id === _id, [_id])
   );
-  const { setter, selectedRoom } = useGlobalStore((state) => state);
-  const isInViewport = useOnScreen(messageRef);
+  const setter = useGlobalStore((state) => state.setter);
+  const selectedRoom = useGlobalStore((state) => state.selectedRoom);
+  const [isInViewport, setIsInViewport] = useState<boolean>(false);
+  useOnScreen(messageRef, setIsInViewport);
+  // console.log("Message component re-rendered for message ID:", _id);
+  console.log("message.tsx");
 
   //Calculate whether the message is the last message from the current sender.
   const isLastMessageFromUser = useMemo(
@@ -73,191 +68,55 @@ const Message = (msgData: MessageModel & Props) => {
   );
   // Check if the message was sent from me
   const isFromMe = useMemo(() => sender?._id === myId, [sender, myId]);
+
   const isChannel = useMemo(() => {
     return selectedRoom?.type === "channel";
   }, [selectedRoom?.type]);
-  const isMeJoined = useMemo(
-    () =>
-      selectedRoom?.participants.find((user) => user === myId) ||
-      selectedRoom?.admins.includes(myId) ||
-      selectedRoom?.creator === myId,
-    [
-      myId,
-      selectedRoom?.admins,
-      selectedRoom?.creator,
-      selectedRoom?.participants,
-    ]
-  );
-  const canMessageAction = isMeJoined && modalMsgData?._id === _id;
 
+  const isMeJoined = useMemo(() => {
+    if (!selectedRoom) return false;
+    const { participants, admins, creator } = selectedRoom;
+    return (
+      participants.find((user) => user === myId) ||
+      admins.includes(myId) ||
+      creator === myId
+    );
+  }, [selectedRoom, myId]);
+
+  const canMessageAction = isMeJoined && isThisMessageSelected;
   const messageTime = useMemo(() => getTimeFromDate(createdAt), [createdAt]);
   const stickyDates = useMemo(() => dateString(createdAt), [createdAt]);
 
-  // Get voice info
-  const {
-    isPlaying,
-    voiceData,
-    setter: audioUpdater,
-    downloadedAudios,
-    audioElem,
-  } = useAudio((state) => state);
-
-  // The structure of sound waves
-  const { songWaves, waveUpdater, resetWaves } = useMemo(() => {
-    const waveUpdater = (progress: number) => {
-      const activeWaveIndex = Math.floor(progress * 25);
-      const partialFill = (progress * 25 - activeWaveIndex) * 100;
-      for (let i = 0; i < 25; i++) {
-        const elem = document.getElementById(`${_id}${i}`);
-        if (elem) {
-          if (i < activeWaveIndex) {
-            elem.style.background = "white";
-          } else if (i === activeWaveIndex) {
-            elem.style.background = `linear-gradient(to right, white ${partialFill}%, #4bbfff ${partialFill}%)`;
-          } else {
-            elem.style.background = "#4bbfff";
-          }
-        }
-      }
-    };
-
-    const resetWaves = () => {
-      for (let i = 0; i < 25; i++) {
-        const elem = document.getElementById(`${_id}${i}`);
-        if (elem) {
-          elem.style.background = "#4bbfff";
-        }
-      }
-    };
-
-    const waves = Array.from({ length: 25 }, (_, index) => {
-      const randomHeight = Math.random() * 10 + 6;
-      return (
-        <div
-          id={`${_id}${index}`}
-          key={index}
-          className="w-[0.17rem] rounded-4xl"
-          style={{ height: `${randomHeight}px` }}
-        />
-      );
-    });
-
-    return { songWaves: waves, waveUpdater, resetWaves };
-  }, [_id]);
-
-  // Update audio waves (animation)
-  useEffect(() => {
-    if (voiceData?._id !== _id || !audioElem) {
-      resetWaves();
-      return;
-    }
-
-    const updateWave = () => {
-      if (audioElem) {
-        const totalTime = voiceData.duration || audioElem.duration;
-        const currentTime = audioElem.currentTime || 0;
-        const progress = totalTime ? currentTime / totalTime : 0;
-        waveUpdater(progress);
-        setVoiceCurrentTime(currentTime);
-        animationRef.current = requestAnimationFrame(updateWave);
-      }
-    };
-
-    animationRef.current = requestAnimationFrame(updateWave);
-
-    return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-      }
-    };
-  }, [
-    _id,
-    audioElem,
-    resetWaves,
-    voiceData?._id,
-    voiceData?.duration,
-    waveUpdater,
-  ]);
-
-  // Handler for playing/pausing audio
-  const togglePlayVoice = useCallback(() => {
-    if (!isFromMe && !voiceDataProp?.playedBy?.includes(myId)) {
-      const socket = useSockets.getState().rooms;
-      socket?.emit("listenToVoice", { userID: myId, voiceID: _id, roomID });
-    }
-
-    const savedVoiceData = downloadedAudios.find((voice) => voice._id === _id);
-    if (!savedVoiceData) {
-      audioUpdater({
-        isPlaying: false,
-        voiceData: { ...voiceDataProp!, ...msgData },
-        downloadedAudios: [
-          ...downloadedAudios,
-          { _id, isDownloading: true, downloaded: false },
-        ],
-      });
-      return;
-    }
-
-    if (savedVoiceData.isDownloading) {
-      audioUpdater({
-        isPlaying: false,
-        voiceData: null,
-        downloadedAudios: downloadedAudios.filter((audio) => audio._id !== _id),
-      });
-      return;
-    }
-
-    audioUpdater({
-      isPlaying: voiceData?._id === _id ? !isPlaying : true,
-      voiceData: { ...voiceDataProp!, ...msgData },
-    });
-  }, [
-    isFromMe,
-    voiceDataProp,
-    myId,
-    _id,
-    roomID,
-    downloadedAudios,
-    audioUpdater,
-    voiceData,
-    isPlaying,
-    msgData,
-  ]);
-
   // Open the sender's profile
-  const openProfile = useCallback(() => {
+  const openProfile = () => {
     setter({
       RoomDetailsData: sender,
       shouldCloseAll: true,
       isRoomDetailsShown: true,
     });
-  }, [setter, sender]);
+  };
 
   //Update modal data (for editing, replying, and pinning)
-  const updateModalMsgData = useCallback(
-    (e: React.MouseEvent) => {
-      if (msgData._id === modalMsgData?._id) return;
-      modalSetter((prev) => ({
-        ...prev,
-        clickPosition: { x: e.clientX, y: e.clientY },
-        msgData,
-        edit,
-        reply: () => addReplay(_id),
-        pin,
-      }));
-    },
-    [msgData, modalMsgData, modalSetter, addReplay, _id, edit, pin]
-  );
+  const updateModalMsgData = (e: React.MouseEvent) => {
+    if (msgData._id === useModalStore.getState().msgData?._id) return;
+    modalSetter((prev) => ({
+      ...prev,
+      clickPosition: { x: e.clientX, y: e.clientY },
+      msgData,
+      edit,
+      reply: () => addReplay(_id),
+      pin,
+    }));
+  };
 
-  //Send message view event if message is in viewport
   useEffect(() => {
-    if (!isFromMe && !seen.includes(myId) && isInViewport && rooms) {
+    if (!isFromMe && !seen.some((id) => id === myId) && isInViewport && rooms) {
       rooms.emit("seenMsg", {
         seenBy: myId,
         sender,
         msgID: _id,
         roomID,
+        readTime: new Date().toISOString(),
       });
     }
   }, [_id, isFromMe, isInViewport, myId, roomID, rooms, seen, sender]);
@@ -266,46 +125,6 @@ const Message = (msgData: MessageModel & Props) => {
   useEffect(() => {
     setIsMounted(true);
   }, []);
-
-  // Calculate and render audio icons (based on download and playback status)
-  const audioIcon = useMemo(() => {
-    const isDownloading = downloadedAudios.some(
-      (audio) => audio._id === _id && audio.isDownloading
-    );
-    const isDownloaded = downloadedAudios.some(
-      (audio) => audio._id === _id && audio.downloaded
-    );
-
-    if (voiceData?._id === _id) {
-      if (isDownloading) {
-        return (
-          <span className="absolute flex-center">
-            <Loading
-              classNames={`absolute w-10 ${
-                isFromMe ? "bg-darkBlue" : "bg-white"
-              }`}
-            />
-            <IoClose data-aos="zoom-in" className="size-6" />
-          </span>
-        );
-      } else if (isDownloaded) {
-        return isPlaying ? (
-          <FaPause data-aos="zoom-in" className="size-5" />
-        ) : (
-          <FaPlay data-aos="zoom-in" className="ml-1" />
-        );
-      } else {
-        return <FaArrowDown data-aos="zoom-in" className="size-5" />;
-      }
-    } else {
-      return isDownloaded ? (
-        <FaPlay data-aos="zoom-in" className="ml-1" />
-      ) : (
-        <FaArrowDown data-aos="zoom-in" className="size-5" />
-      );
-    }
-  }, [downloadedAudios, voiceData, _id, isPlaying, isFromMe]);
-  // console.log(sender?.name, sender?._id);
 
   return (
     <>
@@ -418,38 +237,17 @@ const Message = (msgData: MessageModel & Props) => {
             )}
             {voiceDataProp && (
               <div className="flex items-center gap-3 bg-inherit w-full mt-2">
-                <div
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    togglePlayVoice();
-                  }}
-                  className={`rounded-full size-10 cursor-pointer relative flex-center overflow-hidden ${
-                    isFromMe
-                      ? "bg-white text-darkBlue"
-                      : "bg-darkBlue text-white"
-                  }`}
-                >
-                  {audioIcon}
-                </div>
-
-                <div className="flex flex-col gap-1 justify-center">
-                  <div className="overflow-hidden text-nowrap flex items-center gap-[1.5px] relative z-0">
-                    {songWaves}
-                  </div>
-
-                  <div className="flex items-center gap-px text-[12px] mr-auto text-white/60">
-                    {voiceData?._id === _id && isPlaying
-                      ? secondsToTimeString(voiceCurrentTime)
-                      : secondsToTimeString(voiceDataProp.duration)}
-                    {voiceDataProp?.playedBy &&
-                      voiceDataProp.playedBy.length === 0 && (
-                        <div className="size-1.5 ml-1 mb-0.5 rounded-full bg-white" />
-                      )}
-                  </div>
-                </div>
+                <VoiceMessagePlayer
+                  _id={_id}
+                  voiceDataProp={voiceDataProp}
+                  msgData={msgData}
+                  isFromMe={isFromMe}
+                  myId={myId}
+                  roomID={roomID}
+                />
               </div>
             )}
-            <p dir="auto" className="text-white break-keep ">
+            <p dir="auto" className="text-white break-all ">
               {message}
             </p>
           </div>
@@ -475,7 +273,7 @@ const Message = (msgData: MessageModel & Props) => {
             </p>
             {isFromMe &&
               !isChannel &&
-              (seen.length ? (
+              (seen?.length ? (
                 <Image
                   src="/shapes/seen.svg"
                   width={15}
@@ -496,6 +294,8 @@ const Message = (msgData: MessageModel & Props) => {
       </div>
     </>
   );
-};
+});
+
+Message.displayName = "Message";
 
 export default Message;
