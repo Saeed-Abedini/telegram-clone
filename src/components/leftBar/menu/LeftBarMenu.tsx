@@ -7,9 +7,10 @@ import EditUsername from "./EditUsername";
 interface Props {
   isOpen: boolean;
   closeMenu: () => void;
+  onRouteChanged: (route: string) => void;
 }
 
-const LeftBarMenu = ({ closeMenu, isOpen }: Props) => {
+const LeftBarMenu = ({ closeMenu, isOpen, onRouteChanged }: Props) => {
   const [route, setRoute] = useState("/");
   const [activeRoute, setActiveRoute] = useState<ReactNode>(<div></div>);
 
@@ -33,6 +34,7 @@ const LeftBarMenu = ({ closeMenu, isOpen }: Props) => {
   };
 
   useEffect(() => {
+    onRouteChanged(route);
     switch (route) {
       case "/": {
         setActiveRoute(

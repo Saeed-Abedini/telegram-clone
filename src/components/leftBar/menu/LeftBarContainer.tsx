@@ -17,10 +17,10 @@ const LeftBarContainer = ({
   return (
     <div
       data-aos="fade-right"
-      className="size-full bg-leftBarBg overflow-y-auto overflow-x-hidden scroll-w-none z-50"
+      className="size-full h-dvh bg-leftBarBg  overflow-x-hidden scroll-w-none z-50"
       style={{ zIndex: 99999999 }}
     >
-      <div className="flex items-center p-4 sticky top-0  z-50 justify-between w-full text-white bg-leftBarBg">
+      <div className="flex items-center p-4 sticky top-0  z-50 justify-between w-full text-white bg-leftBarBg ">
         <div className="flex items-center gap-4">
           <IoArrowBackOutline
             onClick={getBack}
@@ -34,7 +34,7 @@ const LeftBarContainer = ({
         {leftHeaderChild}
       </div>
 
-      <div className="z-30">{children}</div>
+      <div className="z-30 ">{children}</div>
     </div>
   );
 };

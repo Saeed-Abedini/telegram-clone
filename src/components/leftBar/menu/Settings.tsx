@@ -195,13 +195,13 @@ const Settings = ({ getBack, updateRoute }: Props) => {
               dropDownItems={dropDownItems}
               classNames="top-0 right-0 w-48"
               button={
-                <BsThreeDotsVertical className="size-8 cursor-pointer ml-auto pr-2" />
+                <BsThreeDotsVertical className="size-8 cursor-pointer ml-auto p-1.5" />
               }
             />
           </>
         }
       >
-        <div className="relative text-white">
+        <div className="relative text-white min-h-dvh overflow-y-auto">
           <div className="absolute px-4 inset-x-0 w-full ">
             <div className="flex items-center gap-3 my-3 ">
               {
