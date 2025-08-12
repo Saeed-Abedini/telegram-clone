@@ -6,6 +6,7 @@ export default interface Message {
   sender: User;
   isEdited: boolean;
   seen: string[];
+  readTime: Date | null;
   replays: string[];
   pinnedAt: string | null;
   voiceData: { src: string; duration: number; playedBy: string[] } | null;
