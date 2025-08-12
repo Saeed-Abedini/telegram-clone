@@ -27,6 +27,7 @@ import useGlobalStore from "@/stores/globalStore";
 import Image from "next/image";
 import Message from "@/models/message";
 import ProfileGradients from "../modules/ProfileGradients";
+import { formatDateByDistance } from "@/utils/Date/formatDateByDistance";
 
 interface MessageActionsProps {
   isFromMe: boolean;
@@ -189,6 +190,32 @@ const MessageActions = ({ isFromMe }: MessageActionsProps) => {
               <MdOutlinePlayCircle className="size-5  text-gray-400 mb-1" />
             ),
             onClick: () => setIsCollapsed((prev) => !prev),
+            itemClassNames: "border-b-3 border-chatBg",
+          },
+        roomData?.type === "private" &&
+          msgData?.sender._id === myID &&
+          msgData?.seen?.length &&
+          msgData?.readTime &&
+          !isCollapsed && {
+            title: (
+              <div className="flex relative justify-between items-center w-full">
+                read{" "}
+                {msgData?.readTime
+                  ? formatDateByDistance(
+                      new Date(msgData.readTime).toISOString()
+                    )
+                  : ""}
+              </div>
+            ),
+            icon: (
+              <Image
+                src="/shapes/seen.svg"
+                width={15}
+                height={15}
+                className="size-4 mb-0.5 duration-500"
+                alt="seen"
+              />
+            ),
             itemClassNames: "border-b-3 border-chatBg",
           },
         ...(!isCollapsed
