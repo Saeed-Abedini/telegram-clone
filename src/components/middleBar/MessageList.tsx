@@ -65,6 +65,10 @@ const MessageList = ({
               isPv={type === "private"}
               stickyDate={stickyDate}
               nextMessage={messages[index + 1] || null}
+              replayedToMessage={
+                messages.find((msg) => msg._id === data.replayedTo?.msgID) ||
+                null
+              }
               {...data}
             />
           </div>

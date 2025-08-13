@@ -23,6 +23,7 @@ import User from "@/models/user";
 import Modal from "../modules/ui/Modal";
 import DropDown from "../modules/ui/DropDown";
 import useModalStore from "@/stores/modalStore";
+import useAudio from "@/stores/audioStore";
 import useGlobalStore from "@/stores/globalStore";
 import Image from "next/image";
 import Message from "@/models/message";
@@ -79,8 +80,16 @@ const MessageActions = ({ isFromMe }: MessageActionsProps) => {
       onSubmit: async () => {
         const currentIsChecked = useModalStore.getState().isChecked;
 
-        if (msgData?.voiceData?.src && currentIsChecked) {
-          await deleteFile(msgData.voiceData.src);
+        if (msgData?.voiceData?.src) {
+          if (useAudio.getState().voiceData?.src === msgData.voiceData.src) {
+            useAudio.getState().toggleAudioPlayback();
+            useAudio
+              .getState()
+              .setter({ currentTime: 0, isPlaying: false, voiceData: null });
+          }
+          if (currentIsChecked) {
+            await deleteFile(msgData.voiceData.src);
+          }
         }
 
         roomSocket?.emit("deleteMsg", {

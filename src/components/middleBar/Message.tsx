@@ -23,6 +23,7 @@ interface Props {
   voiceData?: Voice | null;
   stickyDate: string | null;
   nextMessage: MessageModel;
+  replayedToMessage: MessageModel | null;
 }
 
 const Message = memo((msgData: MessageModel & Props) => {
@@ -43,6 +44,7 @@ const Message = memo((msgData: MessageModel & Props) => {
     nextMessage,
     voiceData: voiceDataProp,
     stickyDate,
+    replayedToMessage,
   } = msgData;
 
   const [isMounted, setIsMounted] = useState(false);
@@ -208,11 +210,11 @@ const Message = memo((msgData: MessageModel & Props) => {
           )}
 
           <div className="flex flex-col text-sm gap-1 p-1 mt-1 break-words mb-3">
-            {replayedTo && (
+            {replayedToMessage && !replayedToMessage.hideFor.includes(myId) && (
               <div
                 onClick={(e) => {
                   e.stopPropagation();
-                  scrollToMessage(replayedTo?.msgID);
+                  scrollToMessage(replayedToMessage?._id);
                 }}
                 className={`${
                   isFromMe
@@ -226,10 +228,10 @@ const Message = memo((msgData: MessageModel & Props) => {
                   } left-0 inset-y-0 w-[3px] h-full`}
                 ></span>
                 <p className="font-vazirBold text-xs break-words text-start line-clamp-1 text-ellipsis">
-                  {replayedTo.username}
+                  {replayedTo?.username}
                 </p>
                 <p className="font-thin break-words line-clamp-1 text-ellipsis text-left text-xs">
-                  {replayedTo.message || "Voice Message"}
+                  {replayedTo?.message || "Voice Message"}
                 </p>
               </div>
             )}
