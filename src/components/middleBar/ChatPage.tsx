@@ -27,7 +27,7 @@ import Modal from "../modules/ui/Modal";
 import { scrollToMessage } from "@/utils";
 import ProfileGradients from "../modules/ProfileGradients";
 
-const ChatMessage = lazy(() => import("./ChatBox"));
+const ChatBox = lazy(() => import("./ChatBox"));
 
 export interface msgDate {
   date: string;
@@ -300,7 +300,7 @@ const ChatPage = () => {
           </div>
         }
       >
-        <ChatMessage
+        <ChatBox
           setTypings={setTypings}
           pinnedMessages={pinnedMessages}
           setEditData={setEditData}
