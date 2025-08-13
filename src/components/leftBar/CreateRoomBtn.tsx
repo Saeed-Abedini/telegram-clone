@@ -30,20 +30,19 @@ const CreateRoomBtn = () => {
   ];
 
   return (
-    <div className={`absolute right-3 bottom-3 z-10 text-white`}>
+    <div
+      className={`absolute right-3 bottom-3 z-10 text-white cursor-pointer`}
+      onClick={() => setIsDropDownOpen(!isDropDownOpen)}
+    >
       <DropDown
         dropDownItems={dropDownItems}
         classNames="bottom-16 right-0 w-40"
         isOpen={isDropDownOpen}
         setIsOpen={setIsDropDownOpen}
         button={
-          <div className="bg-darkBlue size-14 rounded-full flex-center cursor-pointer">
+          <div className="bg-darkBlue size-14 rounded-full flex-center">
             {isDropDownOpen ? (
-              <IoClose
-                data-aos="zoom-in"
-                className="size-7"
-                onClick={() => setIsDropDownOpen(false)}
-              />
+              <IoClose data-aos="zoom-in" className="size-7" />
             ) : (
               <MdModeEditOutline data-aos="zoom-in" className="size-7" />
             )}
