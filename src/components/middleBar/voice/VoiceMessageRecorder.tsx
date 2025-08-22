@@ -1,12 +1,18 @@
 import Message from "@/models/message";
-import useGlobalStore from "@/stores/globalStore";
+import useGlobalStore, { GlobalStoreProps } from "@/stores/globalStore";
 import useUserStore from "@/stores/userStore";
 import useSockets from "@/stores/useSockets";
-import { secondsToTimeString, toaster, uploadFile } from "@/utils";
+import { pendingMessagesService } from "@/utils/pendingMessages";
+import {
+  secondsToTimeString,
+  toaster,
+  uploadFile as uploadFileWithRetry,
+} from "@/utils";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { PiMicrophoneLight } from "react-icons/pi";
 import Loading from "../../modules/ui/Loading";
 import { RiSendPlaneFill } from "react-icons/ri";
+import { v4 as uuidv4 } from "uuid";
 
 interface Props {
   replayData: Partial<Message> | undefined;
@@ -19,10 +25,15 @@ const VoiceMessageRecorder = ({
   closeEdit,
   closeReplay,
 }: Props) => {
+  const selectedRoom = useGlobalStore((state) => state.selectedRoom);
+  const myData = useUserStore((state) => state);
+  const setter = useGlobalStore((state) => state.setter);
+  const { rooms } = useSockets((state) => state);
   const [isRecording, setIsRecording] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [audioURL, setAudioURL] = useState("");
   const [timer, setTimer] = useState(0);
+  const [pendingMessageId, setPendingMessageId] = useState<string | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -69,9 +80,9 @@ const VoiceMessageRecorder = ({
         ? {
             targetID: replayData._id,
             replayedTo: {
-              message: replayData.message,
-              msgID: replayData._id,
-              username: replayData.sender?.name,
+              message: replayData.message || "",
+              msgID: replayData._id || "",
+              username: replayData.sender?.name || "",
             },
           }
         : null,
@@ -95,48 +106,342 @@ const VoiceMessageRecorder = ({
     }
   }, [stopStream]);
 
-  const sendVoiceMessage = useCallback(
-    (voiceSrc: string, voiceDuration: number) => {
-      const socket = useSockets.getState().rooms;
-      const myData = useUserStore.getState();
-      const selectedRoom = useGlobalStore.getState().selectedRoom;
+  // Create pending message and return its ID
+  const createPendingMessage = useCallback(
+    (
+      voiceData: { src: string; duration: number; playedBy: string[] },
+      tempId: string
+    ) => {
+      const localMessage = {
+        _id: tempId,
+        message: "",
+        sender: myData,
+        isEdited: false,
+        seen: [],
+        readTime: null,
+        replays: [],
+        pinnedAt: null,
+        playedBy: null,
+        hideFor: [],
+        updatedAt: new Date().toISOString(),
+        roomID: selectedRoom?._id || "",
+        status: "pending" as const,
+        voiceData,
+        replayedTo: formattedReplayData()
+          ? formattedReplayData()!.replayedTo
+          : null,
+        createdAt: new Date().toISOString(),
+        uploadProgress: 0,
+        tempId,
+      };
 
+      setter(
+        (prev: GlobalStoreProps): Partial<GlobalStoreProps> => ({
+          selectedRoom: prev.selectedRoom
+            ? {
+                ...prev.selectedRoom,
+                messages: [
+                  ...(prev.selectedRoom?.messages ?? []),
+                  localMessage,
+                ] as Message[],
+              }
+            : null,
+        })
+      );
+
+      pendingMessagesService.addPendingMessage(
+        selectedRoom?._id || "",
+        localMessage
+      );
+
+      return tempId;
+    },
+    [myData, selectedRoom, setter, formattedReplayData]
+  );
+
+  // Send message with retry logic
+  const sendWithRetry = useCallback(
+    (
+      payload: {
+        roomID: string | undefined;
+        message: string;
+        sender: typeof myData;
+        replayData: {
+          targetID: string;
+          replayedTo: {
+            message: string;
+            msgID: string;
+            username: string | undefined;
+          };
+        } | null;
+        voiceData: {
+          src: string;
+          duration: number;
+          playedBy: string[];
+        };
+        tempId: string;
+      },
+      tempId: string,
+      startTime: number = Date.now(),
+      attempts: number = 0
+    ) => {
+      rooms?.emit(
+        "newMessage",
+        payload,
+        (response: { success: boolean; _id: string }) => {
+          if (response?.success) {
+            setter(
+              (prev: GlobalStoreProps): Partial<GlobalStoreProps> => ({
+                selectedRoom: prev.selectedRoom
+                  ? {
+                      ...prev.selectedRoom,
+                      messages: prev.selectedRoom.messages.map((msg) =>
+                        msg._id === tempId
+                          ? { ...msg, _id: response._id, status: "sent" }
+                          : msg
+                      ),
+                    }
+                  : null,
+              })
+            );
+            pendingMessagesService.removePendingMessage(
+              payload.roomID || "",
+              tempId
+            );
+            setPendingMessageId(null);
+            stopRecording();
+          } else {
+            attempts++;
+            const elapsed = Date.now() - startTime;
+            if (elapsed < 30000) {
+              setTimeout(
+                () => sendWithRetry(payload, tempId, startTime, attempts),
+                2000
+              );
+            } else {
+              toaster(
+                "error",
+                "Failed to send voice message after multiple retries."
+              );
+              setter(
+                (prev: GlobalStoreProps): Partial<GlobalStoreProps> => ({
+                  selectedRoom: prev.selectedRoom
+                    ? {
+                        ...prev.selectedRoom,
+                        messages: prev.selectedRoom.messages.map((msg) =>
+                          msg._id === tempId
+                            ? { ...msg, status: "failed" }
+                            : msg
+                        ),
+                      }
+                    : null,
+                })
+              );
+              setPendingMessageId(null);
+              stopRecording();
+            }
+          }
+        }
+      );
+    },
+    [rooms, setter, stopRecording]
+  );
+
+  const sendVoiceMessage = useCallback(
+    (voiceSrc: string, voiceDuration: number, tempId: string) => {
       const voiceData = {
         src: voiceSrc,
         duration: voiceDuration,
         playedBy: [],
       };
 
-      socket?.emit("newMessage", {
+      const payload = {
         roomID: selectedRoom?._id,
         message: "",
         sender: myData,
-        replayData: formattedReplayData,
+        replayData: formattedReplayData(),
         voiceData,
-      });
+        tempId,
+      };
 
-      socket?.on("newMessage", stopRecording);
+      sendWithRetry(
+        {
+          ...payload,
+          replayData: payload.replayData
+            ? {
+                targetID: payload.replayData.targetID!,
+                replayedTo: {
+                  message: payload.replayData.replayedTo.message!,
+                  msgID: payload.replayData.replayedTo.msgID!,
+                  username: payload.replayData.replayedTo.username,
+                },
+              }
+            : null,
+        },
+        tempId
+      );
       closeEdit();
       closeReplay();
     },
-    [closeEdit, closeReplay, formattedReplayData, stopRecording]
+    [
+      closeEdit,
+      closeReplay,
+      formattedReplayData,
+      sendWithRetry,
+      selectedRoom,
+      myData,
+    ]
   );
   const uploadVoice = useCallback(
     async (voiceFile: File) => {
       try {
         setIsLoading(true);
-        const downloadUrl = await uploadFile(voiceFile);
+        const tempId = uuidv4();
 
-        if (downloadUrl) {
-          sendVoiceMessage(downloadUrl, timerRef.current);
+        // Create pending message immediately
+        const voiceData = {
+          src: "", // Will be updated after upload
+          duration: timerRef.current,
+          playedBy: [],
+        };
+
+        createPendingMessage(voiceData, tempId);
+        setPendingMessageId(tempId);
+
+        // Start upload with progress tracking
+        const startTime = Date.now();
+        const minUploadTime = 2000; // Minimum 2 seconds to show progress
+
+        const uploadResult = await uploadFileWithRetry(
+          voiceFile,
+          (progress) => {
+            // Ensure progress is visible for at least 2 seconds minimum
+            const elapsedTime = Date.now() - startTime;
+            const adjustedProgress = Math.min(progress, 95);
+
+            // If upload is too fast, artificially slow it down
+            if (elapsedTime < minUploadTime && progress < 100) {
+              const slowProgress = Math.min(
+                adjustedProgress,
+                (elapsedTime / minUploadTime) * 95
+              );
+              // Update message in store with progress
+              setter(
+                (prev: GlobalStoreProps): Partial<GlobalStoreProps> => ({
+                  selectedRoom: prev.selectedRoom
+                    ? {
+                        ...prev.selectedRoom,
+                        messages: prev.selectedRoom.messages.map((msg) =>
+                          msg._id === tempId
+                            ? { ...msg, uploadProgress: slowProgress }
+                            : msg
+                        ),
+                      }
+                    : null,
+                })
+              );
+            } else {
+              // Update message in store with progress
+              setter(
+                (prev: GlobalStoreProps): Partial<GlobalStoreProps> => ({
+                  selectedRoom: prev.selectedRoom
+                    ? {
+                        ...prev.selectedRoom,
+                        messages: prev.selectedRoom.messages.map((msg) =>
+                          msg._id === tempId
+                            ? { ...msg, uploadProgress: adjustedProgress }
+                            : msg
+                        ),
+                      }
+                    : null,
+                })
+              );
+            }
+          }
+        );
+
+        // Ensure minimum upload time is respected
+        const elapsedTime = Date.now() - startTime;
+        const remainingTime = Math.max(0, minUploadTime - elapsedTime);
+
+        // Animate progress to 100%
+        const finalProgressAnimation = async () => {
+          setter(
+            (prev: GlobalStoreProps): Partial<GlobalStoreProps> => ({
+              selectedRoom: prev.selectedRoom
+                ? {
+                    ...prev.selectedRoom,
+                    messages: prev.selectedRoom.messages.map((msg) =>
+                      msg._id === tempId ? { ...msg, uploadProgress: 100 } : msg
+                    ),
+                  }
+                : null,
+            })
+          );
+        };
+
+        if (remainingTime > 0) {
+          await new Promise((resolve) => setTimeout(resolve, remainingTime));
+          await finalProgressAnimation();
+          await new Promise((resolve) => setTimeout(resolve, 300)); // Brief pause at 100%
+        } else {
+          await finalProgressAnimation();
+          await new Promise((resolve) => setTimeout(resolve, 500)); // Brief pause at 100%
+        }
+
+        if (uploadResult.success) {
+          sendVoiceMessage(uploadResult.downloadUrl!, timerRef.current, tempId);
+        } else {
+          toaster(
+            "error",
+            uploadResult.error || "Failed to upload voice message."
+          );
+          setter(
+            (prev: GlobalStoreProps): Partial<GlobalStoreProps> => ({
+              selectedRoom: prev.selectedRoom
+                ? {
+                    ...prev.selectedRoom,
+                    messages: prev.selectedRoom.messages.map((msg) =>
+                      msg._id === tempId ? { ...msg, status: "failed" } : msg
+                    ),
+                  }
+                : null,
+            })
+          );
+          setPendingMessageId(null);
+          stopRecording();
         }
       } catch (error) {
         console.error("Upload failed:", error);
         toaster("error", "Upload failed! Please try again.");
+        if (pendingMessageId) {
+          // Mark message as failed
+          setter(
+            (prev: GlobalStoreProps): Partial<GlobalStoreProps> => ({
+              selectedRoom: prev.selectedRoom
+                ? {
+                    ...prev.selectedRoom,
+                    messages: prev.selectedRoom.messages.map((msg) =>
+                      msg._id === pendingMessageId
+                        ? { ...msg, status: "failed" }
+                        : msg
+                    ),
+                  }
+                : null,
+            })
+          );
+        }
+        setPendingMessageId(null);
         stopRecording();
       }
     },
-    [sendVoiceMessage, stopRecording]
+    [
+      createPendingMessage,
+      setter,
+      sendVoiceMessage,
+      pendingMessageId,
+      stopRecording,
+    ]
   );
 
   const startRecording = useCallback(async () => {

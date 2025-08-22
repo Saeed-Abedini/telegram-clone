@@ -8,6 +8,7 @@ import Loading from "../../modules/ui/Loading";
 import MessageModel from "@/models/message";
 import Voice from "@/models/voice";
 import AudioWaveDisplay from "./AudioWaveDisplay";
+import CircularProgress from "../../modules/ui/CircularProgress";
 
 interface VoiceMessagePlayerProps {
   _id: string;
@@ -36,6 +37,11 @@ const VoiceMessagePlayer = memo(
 
     // Handler for playing/pausing audio
     const togglePlayVoice = () => {
+      // Don't allow playback if voice is still uploading
+      if (msgData.status === "pending" && !voiceDataProp?.src) {
+        return;
+      }
+
       if (!isFromMe && !voiceDataProp?.playedBy?.includes(myId)) {
         const socket = useSockets.getState().rooms;
         socket?.emit("listenToVoice", { userID: myId, voiceID: _id, roomID });
@@ -112,12 +118,25 @@ const VoiceMessagePlayer = memo(
       );
       const isCurrentVoice = voiceData?._id === _id;
 
+      // Show upload progress for pending voice messages
+      if (
+        msgData.status === "pending" &&
+        msgData.uploadProgress !== undefined
+      ) {
+        return (
+          <div className="relative flex-center">
+            <CircularProgress progress={msgData.uploadProgress} />
+            <IoClose data-aos="zoom-in" className="size-6 absolute" />
+          </div>
+        );
+      }
+
       if (isCurrentVoice) {
         if (isDownloading) {
           return (
             <span className="absolute flex-center">
               <Loading
-                classNames={`absolute w-10 ${
+                classNames={`absolute w-9 ${
                   isFromMe ? "bg-darkBlue" : "bg-white"
                 }`}
               />
@@ -140,7 +159,15 @@ const VoiceMessagePlayer = memo(
       ) : (
         <FaArrowDown data-aos="zoom-in" className="size-5" />
       );
-    }, [downloadedAudios, _id, voiceData?._id, isFromMe, isPlaying]);
+    }, [
+      downloadedAudios,
+      _id,
+      voiceData?._id,
+      isFromMe,
+      isPlaying,
+      msgData.status,
+      msgData.uploadProgress,
+    ]);
 
     return (
       <div
@@ -148,17 +175,25 @@ const VoiceMessagePlayer = memo(
           isFromMe ? "text-white" : "text-gray-700"
         }`}
       >
-        <button
-          className={`rounded-full size-10 cursor-pointer relative flex-center overflow-hidden ${
-            isFromMe ? "bg-white text-darkBlue" : "bg-darkBlue text-white"
-          }`}
-          onClick={(e) => {
-            e.stopPropagation();
-            togglePlayVoice();
-          }}
-        >
-          {audioIcon}
-        </button>
+        <div className="flex flex-col items-center">
+          <button
+            className={`rounded-full size-10 cursor-pointer relative flex-center overflow-hidden ${
+              isFromMe ? "bg-white text-darkBlue" : "bg-darkBlue text-white"
+            }`}
+            onClick={(e) => {
+              e.stopPropagation();
+              togglePlayVoice();
+            }}
+          >
+            {audioIcon}
+          </button>
+          {msgData.status === "pending" &&
+            msgData.uploadProgress !== undefined && (
+              <span className="text-[10px] mt-0.5 font-medium">
+                {msgData.uploadProgress}%
+              </span>
+            )}
+        </div>
         <AudioWaveDisplay _id={_id} voiceDataProp={voiceDataProp} />
       </div>
     );
