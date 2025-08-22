@@ -1,6 +1,7 @@
 import User from "./user";
 
 export default interface Message {
+  tempId?: string;
   _id: string;
   message: string;
   sender: User;
@@ -15,4 +16,6 @@ export default interface Message {
   hideFor: string[];
   createdAt: string;
   updatedAt: string;
+  status?: "pending" | "sent" | "failed";
+  uploadProgress?: number;
 }

@@ -24,19 +24,23 @@ import Modal from "../modules/ui/Modal";
 import DropDown from "../modules/ui/DropDown";
 import useModalStore from "@/stores/modalStore";
 import useAudio from "@/stores/audioStore";
-import useGlobalStore from "@/stores/globalStore";
+import useGlobalStore, { GlobalStoreProps } from "@/stores/globalStore";
 import Image from "next/image";
 import Message from "@/models/message";
 import ProfileGradients from "../modules/ProfileGradients";
 import { formatDateByDistance } from "@/utils/Date/formatDateByDistance";
+import { FiSend } from "react-icons/fi";
+import { pendingMessagesService } from "@/utils/pendingMessages";
+import { msgDataProps } from "./Message";
 
 interface MessageActionsProps {
   isFromMe: boolean;
+  msgData: Message & msgDataProps;
 }
 
 type PlayedByUsersData = User & { seenTime: string };
 
-const MessageActions = ({ isFromMe }: MessageActionsProps) => {
+const MessageActions = ({ isFromMe, msgData }: MessageActionsProps) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [playedByUsersData, setPlayedByUsersData] = useState<
     PlayedByUsersData[]
@@ -44,15 +48,112 @@ const MessageActions = ({ isFromMe }: MessageActionsProps) => {
   const [dropDownPosition, setDropDownPosition] = useState({ x: 0, y: 0 });
   const [isDropDownOpen, setIsDropDownOpen] = useState(false);
 
-  const {
-    setter: modalSetter,
-    msgData,
-    isChecked,
-  } = useModalStore((state) => state);
+  const { setter: modalSetter, isChecked } = useModalStore((state) => state);
   const { setter, selectedRoom } = useGlobalStore((state) => state);
   const roomSocket = useSockets((state) => state.rooms);
-  const myID = useUserStore((state) => state._id);
+  const myData = useUserStore((state) => state);
   const isUserChannel = selectedRoom?.type === "channel" && !isFromMe;
+
+  const retrySend = useCallback(
+    (msg: Message) => {
+      setter(
+        (prev): Partial<GlobalStoreProps> => ({
+          selectedRoom: prev.selectedRoom
+            ? {
+                ...prev.selectedRoom,
+                messages: prev.selectedRoom.messages.map((m) =>
+                  m._id === msg._id ? { ...m, status: "pending" } : m
+                ),
+              }
+            : null,
+        })
+      );
+
+      const payload = {
+        roomID: msg.roomID,
+        message: msg.message,
+        sender: myData,
+        replayData: msg.replayedTo
+          ? { targetID: msg.replayedTo.msgID, replayedTo: msg.replayedTo }
+          : null,
+        voiceData: msg.voiceData,
+        tempId: msg._id,
+      };
+
+      const sendWithRetry = (attempts = 0, startTime = Date.now()) => {
+        const timeoutId = setTimeout(() => {
+          attempts++;
+          const elapsed = Date.now() - startTime;
+          if (elapsed < 10000) {
+            sendWithRetry(attempts, startTime);
+          } else {
+            setter(
+              (prev): Partial<GlobalStoreProps> => ({
+                selectedRoom: prev.selectedRoom
+                  ? {
+                      ...prev.selectedRoom,
+                      messages: prev.selectedRoom.messages.map((m) =>
+                        m._id === msg._id ? { ...m, status: "failed" } : m
+                      ),
+                    }
+                  : null,
+              })
+            );
+          }
+        }, 2000);
+
+        roomSocket?.emit(
+          "newMessage",
+          payload,
+          (response: { success: boolean; _id: string }) => {
+            clearTimeout(timeoutId);
+            if (response?.success) {
+              setter(
+                (prev): Partial<GlobalStoreProps> => ({
+                  selectedRoom: prev.selectedRoom
+                    ? {
+                        ...prev.selectedRoom,
+                        messages: prev.selectedRoom.messages.map((m) =>
+                          m._id === msg._id
+                            ? { ...m, _id: response._id, status: "sent" }
+                            : m
+                        ),
+                      }
+                    : null,
+                })
+              );
+              pendingMessagesService.removePendingMessage(
+                payload.roomID,
+                msg._id
+              );
+            } else {
+              attempts++;
+              const elapsed = Date.now() - startTime;
+              if (elapsed < 10000) {
+                setTimeout(() => sendWithRetry(attempts, startTime), 2000);
+              } else {
+                setter(
+                  (prev): Partial<GlobalStoreProps> => ({
+                    selectedRoom: prev.selectedRoom
+                      ? {
+                          ...prev.selectedRoom,
+                          messages: prev.selectedRoom.messages.map((m) =>
+                            m._id === msg._id ? { ...m, status: "failed" } : m
+                          ),
+                        }
+                      : null,
+                  })
+                );
+              }
+            }
+          }
+        );
+      };
+
+      sendWithRetry();
+    },
+    [setter, myData, roomSocket]
+  );
 
   const roomData = useMemo(() => {
     const rooms = useUserStore.getState()?.rooms;
@@ -68,6 +169,31 @@ const MessageActions = ({ isFromMe }: MessageActionsProps) => {
     if (msgData) copyText(msgData.message);
     onClose();
   }, [msgData, onClose]);
+
+  const retry = useCallback(() => {
+    if (msgData) retrySend(msgData);
+    onClose();
+  }, [msgData, onClose, retrySend]);
+
+  const cancelSending = useCallback(() => {
+    if (msgData.tempId) {
+      pendingMessagesService.cancelPendingMessage(
+        msgData.roomID,
+        msgData.tempId
+      );
+      setter((prev) => ({
+        selectedRoom: prev.selectedRoom
+          ? {
+              ...prev.selectedRoom,
+              messages: prev.selectedRoom.messages.filter(
+                (msg) => msg.tempId !== msgData.tempId
+              ),
+            }
+          : null,
+      }));
+    }
+    onClose();
+  }, [msgData, onClose, setter]);
 
   const deleteMessage = useCallback(() => {
     setIsDropDownOpen(false);
@@ -202,12 +328,12 @@ const MessageActions = ({ isFromMe }: MessageActionsProps) => {
             itemClassNames: "border-b-3 border-chatBg",
           },
         roomData?.type === "private" &&
-          msgData?.sender._id === myID &&
+          msgData?.sender._id === myData._id &&
           msgData?.seen?.length &&
           msgData?.readTime &&
           !isCollapsed && {
             title: (
-              <div className="flex relative justify-between items-center w-full">
+              <div className="flex relative justify-between items-center w-full text-xs">
                 read{" "}
                 {msgData?.readTime
                   ? formatDateByDistance(
@@ -229,40 +355,56 @@ const MessageActions = ({ isFromMe }: MessageActionsProps) => {
           },
         ...(!isCollapsed
           ? [
-              roomData?.type !== "channel" && {
-                title: "Reply",
-                icon: <GoReply className="size-5  text-gray-400 " />,
-                onClick: actionHandler(msgData?.addReplay),
+              msgData?.status !== "sent" && {
+                title: "Cancel sending",
+                icon: <AiOutlineDelete className="size-5  text-gray-400 " />,
+                onClick: cancelSending,
               },
+              msgData?.status === "failed" && {
+                title: "Retry",
+                icon: <FiSend className="size-5  text-gray-400 " />,
+                onClick: retry,
+              },
+              roomData?.type !== "channel" &&
+                msgData?.status === "sent" && {
+                  title: "Reply",
+                  icon: <GoReply className="size-5  text-gray-400 " />,
+                  onClick: actionHandler(msgData?.addReplay),
+                },
               (roomData?.type !== "channel" ||
-                roomData?.admins?.includes(myID)) && {
-                title: msgData?.pinnedAt ? "Unpin" : "Pin",
-                icon: <LuPin className="size-5  text-gray-400 " />,
-                onClick: actionHandler(msgData?.pin),
-              },
+                roomData?.admins?.includes(myData._id)) &&
+                msgData?.status === "sent" && {
+                  title: msgData?.pinnedAt ? "Unpin" : "Pin",
+                  icon: <LuPin className="size-5  text-gray-400 " />,
+                  onClick: actionHandler(msgData?.pin),
+                },
               {
                 title: "Copy",
                 icon: <MdContentCopy className="size-5  text-gray-400 " />,
                 onClick: copy,
               },
-              msgData?.sender._id === myID && {
-                title: "Edit",
-                icon: <MdOutlineModeEdit className="size-5  text-gray-400 " />,
-                onClick: actionHandler(msgData?.edit),
-              },
+              msgData?.sender._id === myData._id &&
+                msgData?.status === "sent" && {
+                  title: "Edit",
+                  icon: (
+                    <MdOutlineModeEdit className="size-5  text-gray-400 " />
+                  ),
+                  onClick: actionHandler(msgData?.edit),
+                },
               (roomData?.type === "private" ||
-                msgData?.sender._id === myID ||
-                roomData?.admins?.includes(myID)) && {
-                title: "Delete",
-                icon: <AiOutlineDelete className="size-5  text-gray-400 " />,
-                onClick: deleteMessage,
-              },
+                msgData?.sender._id === myData._id ||
+                roomData?.admins?.includes(myData._id)) &&
+                msgData?.status === "sent" && {
+                  title: "Delete",
+                  icon: <AiOutlineDelete className="size-5  text-gray-400 " />,
+                  onClick: deleteMessage,
+                },
             ]
           : playedByUsersData.map((user) => ({
               title: (
                 <div className="flex w-full justify-between mt-1">
                   <span className="-ml-2">
-                    {user?._id == myID ? "You" : user?.name}
+                    {user?._id == myData._id ? "You" : user?.name}
                   </span>
                   <span>{getTimeReportFromDate(user.seenTime)}</span>
                 </div>
@@ -294,13 +436,15 @@ const MessageActions = ({ isFromMe }: MessageActionsProps) => {
       isCollapsed,
       msgData,
       roomData,
-      myID,
+      myData._id,
       playedByUsersData,
       copy,
       deleteMessage,
       actionHandler,
       openProfile,
       isUserChannel,
+      retry,
+      cancelSending,
     ]
   );
 

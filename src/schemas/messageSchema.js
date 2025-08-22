@@ -25,6 +25,12 @@ export const schema = new Schema(
       },
       default: null,
     },
+    tempID: { type: String, unique: true },
+    status: {
+      type: String,
+      enum: ["pending", "sent", "failed"],
+      default: "sent",
+    },
   },
   { timestamps: true, strictPopulate: false }
 );

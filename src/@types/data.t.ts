@@ -29,6 +29,8 @@ interface MessageModel {
   hideFor: string[];
   createdAt: string;
   updatedAt: string;
+  status?: "pending" | "sent" | "failed";
+  uploadProgress?: number;
 }
 
 interface LocationModel {

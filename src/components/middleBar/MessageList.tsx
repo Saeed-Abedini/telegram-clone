@@ -52,6 +52,11 @@ const MessageList = ({
             ref={index === messages.length - 1 ? lastMsgRef : null}
           >
             <Message
+              isLastMessageFromUser={
+                messages[index + 1]?.sender._id !== data.sender._id
+              }
+              setEditData={(data) => setEditData(data as MessageModel)}
+              setReplayData={(data) => setReplayData(data.message || null)}
               addReplay={(replyData) => {
                 setEditData(null);
                 setReplayData(replyData);

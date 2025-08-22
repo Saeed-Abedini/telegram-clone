@@ -13,20 +13,26 @@ import { IoMdCheckmark } from "react-icons/io";
 import useModalStore from "@/stores/modalStore";
 import useGlobalStore from "@/stores/globalStore";
 import ProfileGradients from "../modules/ProfileGradients";
+import { IoTimeOutline } from "react-icons/io5";
+import { TbExclamationCircle } from "react-icons/tb";
 
-interface Props {
+export interface msgDataProps {
   myId: string;
+  tempId?: string;
   addReplay: (_id: string) => void;
   edit: (data: MessageModel) => void;
   pin: (_id: string) => void;
   isPv?: boolean;
   voiceData?: Voice | null;
-  stickyDate: string | null;
   nextMessage: MessageModel;
   replayedToMessage: MessageModel | null;
+  stickyDate?: string | null;
+  isLastMessageFromUser: boolean;
+  setEditData: (data: Partial<MessageModel>) => void;
+  setReplayData: (data: Partial<MessageModel>) => void;
 }
 
-const Message = memo((msgData: MessageModel & Props) => {
+const Message = memo((msgData: MessageModel & msgDataProps) => {
   const {
     createdAt,
     message,
@@ -45,6 +51,7 @@ const Message = memo((msgData: MessageModel & Props) => {
     voiceData: voiceDataProp,
     stickyDate,
     replayedToMessage,
+    status,
   } = msgData;
 
   const [isMounted, setIsMounted] = useState(false);
@@ -139,9 +146,9 @@ const Message = memo((msgData: MessageModel & Props) => {
 
       <div
         ref={messageRef}
-        className={`chat transition-all duration-100 w-full  ${
-          isFromMe ? "chat-end " : "chat-start"
-        } ${isMounted ? "" : "opacity-0 scale-0"}`}
+        className={`chat  w-full  ${isFromMe ? "chat-end " : "chat-start"} ${
+          isMounted ? "" : "opacity-0 scale-0"
+        }`}
       >
         {/* Show sender avatar in received messages */}
         {!isFromMe &&
@@ -271,26 +278,38 @@ const Message = memo((msgData: MessageModel & Props) => {
             >
               {isEdited && "edited "} {messageTime}
             </p>
-            {isFromMe &&
-              !isChannel &&
-              (seen?.length ? (
-                <Image
-                  src="/shapes/seen.svg"
-                  width={15}
-                  height={15}
-                  className="size-4 mb-0.5 duration-500"
-                  alt="seen"
-                />
-              ) : (
-                <IoMdCheckmark
-                  width={15}
-                  height={15}
-                  className="size-4 mb-0.5 rounded-full bg-center duration-500"
-                />
-              ))}
+            {isFromMe && !isChannel && (
+              <>
+                {status === "pending" && (
+                  <IoTimeOutline className="size-4 mb-0.5" />
+                )}
+                {status === "failed" && (
+                  <TbExclamationCircle className="size-4 mb-0.5 text-red-500" />
+                )}
+                {status !== "pending" &&
+                  status !== "failed" &&
+                  (seen?.length ? (
+                    <Image
+                      src="/shapes/seen.svg"
+                      width={15}
+                      height={15}
+                      className="size-4 mb-0.5 duration-500"
+                      alt="seen"
+                    />
+                  ) : (
+                    <IoMdCheckmark
+                      width={15}
+                      height={15}
+                      className="size-4 mb-0.5 rounded-full bg-center duration-500"
+                    />
+                  ))}
+              </>
+            )}
           </span>
         </div>
-        {canMessageAction && <MessageActions isFromMe={isFromMe} />}
+        {canMessageAction && (
+          <MessageActions isFromMe={isFromMe} msgData={msgData} />
+        )}
       </div>
     </>
   );

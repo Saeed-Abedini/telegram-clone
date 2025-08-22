@@ -5,13 +5,15 @@ import { MdAttachFile, MdModeEditOutline, MdOutlineDone } from "react-icons/md";
 import { BsFillReplyFill } from "react-icons/bs";
 import VoiceMessageRecorder from "./voice/VoiceMessageRecorder";
 import Message from "@/models/message";
-import useGlobalStore from "@/stores/globalStore";
+import useGlobalStore, { GlobalStoreProps } from "@/stores/globalStore";
 import useUserStore from "@/stores/userStore";
 import useSockets from "@/stores/useSockets";
 import { RiSendPlaneFill } from "react-icons/ri";
 import { FaRegKeyboard } from "react-icons/fa6";
 import { scrollToMessage, toaster } from "@/utils";
 import EmojiPicker from "../modules/EmojiPicker";
+import { v4 as uuidv4 } from "uuid"; // Assume uuid is installed or add it
+import { pendingMessagesService } from "@/utils/pendingMessages";
 
 interface Props {
   replayData?: Partial<Message>;
@@ -37,6 +39,7 @@ const MessageInput = ({
   const userRooms = useUserStore((state) => state.rooms);
   const { rooms } = useSockets((state) => state);
   const myData = useUserStore((state) => state);
+  const setter = useGlobalStore((state) => state.setter);
   const roomId = selectedRoom?._id;
 
   //Helper function to reset the height of TextArea
@@ -72,6 +75,184 @@ const MessageInput = ({
   }, [closeReplay, closeEdit, roomId]);
 
   // Send new message
+  const sendWithRetry = useCallback(
+    (payload: {
+      roomID: string;
+      message: string;
+      sender: {
+        _id: string;
+        name: string;
+        [key: string]: string | undefined;
+      };
+      replayData?: {
+        targetID: string;
+        replayedTo: {
+          message: string;
+          msgID: string;
+          username: string;
+        };
+      } | null;
+      tempId: string;
+    }) => {
+      const tempId = payload.tempId;
+
+      // Add to pending messages storage
+      const pendingMessage = pendingMessagesService.addPendingMessage(
+        payload.roomID,
+        {
+          _id: tempId,
+          message: payload.message,
+          sender: myData,
+          roomID: payload.roomID,
+          status: "pending" as const,
+          replayedTo: payload.replayData ? payload.replayData.replayedTo : null,
+          createdAt: new Date().toISOString(),
+          isEdited: false,
+          seen: [],
+          readTime: null,
+          pinnedAt: null,
+          hideFor: [],
+          updatedAt: new Date().toISOString(),
+          replays: [],
+          voiceData: null,
+          tempId,
+        }
+      );
+
+      // Add local message to state
+      setter(
+        (prev: GlobalStoreProps): Partial<GlobalStoreProps> => ({
+          selectedRoom: prev.selectedRoom
+            ? {
+                ...prev.selectedRoom,
+                messages: [
+                  ...(prev.selectedRoom?.messages ?? []),
+                  pendingMessage,
+                ],
+              }
+            : null,
+        })
+      );
+
+      // Check if online before attempting to send
+      if (!navigator.onLine) {
+        // Will retry when connection is restored
+        return;
+      }
+
+      // Set 30-second timeout for failed status
+      const timeoutId = setTimeout(() => {
+        setter(
+          (prev: GlobalStoreProps): Partial<GlobalStoreProps> => ({
+            selectedRoom: prev.selectedRoom
+              ? {
+                  ...prev.selectedRoom,
+                  messages: prev.selectedRoom.messages.map((msg) =>
+                    msg._id === tempId && msg.status === "pending"
+                      ? { ...msg, status: "failed" }
+                      : msg
+                  ),
+                }
+              : null,
+          })
+        );
+
+        // Update pending storage
+        const pending = pendingMessagesService.getPendingMessages(
+          payload.roomID
+        );
+        const updated = pending.map((msg) =>
+          msg._id === tempId ? { ...msg, status: "failed" as const } : msg
+        );
+        pendingMessagesService.savePendingMessages(payload.roomID, updated);
+      }, 30000); // 30 seconds
+
+      const attemptSend = (attempts: number = 0) => {
+        const startTime = Date.now();
+
+        rooms?.emit(
+          "newMessage",
+          payload,
+          (response: { success: boolean; _id: string }) => {
+            // Clear the 30-second timeout
+            clearTimeout(timeoutId);
+
+            if (response?.success) {
+              // Update message with actual _id and status 'sent'
+              setter(
+                (prev: GlobalStoreProps): Partial<GlobalStoreProps> => ({
+                  selectedRoom: prev.selectedRoom
+                    ? {
+                        ...prev.selectedRoom,
+                        messages: prev.selectedRoom.messages.map((msg) =>
+                          msg._id === tempId
+                            ? { ...msg, _id: response._id, status: "sent" }
+                            : msg
+                        ),
+                      }
+                    : null,
+                })
+              );
+
+              // Remove from pending storage
+              pendingMessagesService.removePendingMessage(
+                payload.roomID,
+                tempId
+              );
+            } else {
+              attempts++;
+              const elapsed = Date.now() - startTime;
+
+              if (elapsed < 30000) {
+                // 30 seconds timeout
+                // Exponential backoff: 1s, 2s, 4s, 8s
+                const delay = Math.min(1000 * Math.pow(2, attempts - 1), 8000);
+                setTimeout(() => attemptSend(attempts), delay);
+              } else {
+                // Set to failed after 30 seconds
+                setter(
+                  (prev: GlobalStoreProps): Partial<GlobalStoreProps> => ({
+                    selectedRoom: prev.selectedRoom
+                      ? {
+                          ...prev.selectedRoom,
+                          messages: prev.selectedRoom.messages.map((msg) =>
+                            msg._id === tempId
+                              ? { ...msg, status: "failed" }
+                              : msg
+                          ),
+                        }
+                      : null,
+                  })
+                );
+
+                // Update pending storage
+                const pending = pendingMessagesService.getPendingMessages(
+                  payload.roomID
+                );
+                const updated = pending.map((msg) =>
+                  msg._id === tempId
+                    ? {
+                        ...msg,
+                        status: "failed" as const,
+                        retryCount: attempts,
+                      }
+                    : msg
+                );
+                pendingMessagesService.savePendingMessages(
+                  payload.roomID,
+                  updated
+                );
+              }
+            }
+          }
+        );
+      };
+
+      attemptSend();
+    },
+    [rooms, myData, setter]
+  );
+
   const sendMessage = useCallback(() => {
     const isExistingRoom = userRooms.some((room) => room._id === roomId);
 
@@ -89,10 +270,31 @@ const MessageInput = ({
             },
           }
         : null,
+      tempId: uuidv4(), // Generate tempId
     };
 
     if (isExistingRoom) {
-      rooms?.emit("newMessage", payload);
+      if (roomId) {
+        sendWithRetry({
+          message: payload.message,
+          sender: {
+            _id: payload.sender._id,
+            name: payload.sender.name,
+          },
+          replayData: payload.replayData
+            ? {
+                targetID: payload.replayData.targetID!,
+                replayedTo: {
+                  message: payload.replayData.replayedTo.message!,
+                  msgID: payload.replayData.replayedTo.msgID!,
+                  username: payload.replayData.replayedTo.username!,
+                },
+              }
+            : null,
+          tempId: payload.tempId,
+          roomID: roomId, // Ensure roomID is defined
+        });
+      }
     } else {
       rooms?.emit("createRoom", {
         newRoomData: selectedRoom,
@@ -109,6 +311,7 @@ const MessageInput = ({
     selectedRoom,
     rooms,
     cleanUpAfterSendingMsg,
+    sendWithRetry,
   ]);
 
   // Edit existing message

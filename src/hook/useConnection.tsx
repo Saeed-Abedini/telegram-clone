@@ -6,6 +6,7 @@ import { UserStoreUpdater } from "@/stores/userStore";
 import { SocketsProps } from "@/stores/useSockets";
 import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
+import { pendingMessagesService } from "@/utils/pendingMessages";
 
 interface useConnectionProps {
   selectedRoom: Room | null;
@@ -62,7 +63,92 @@ const useConnection = ({
     socket.emit("joining", selectedRoom?._id);
 
     socket.on("joining", (roomData) => {
-      if (roomData) setter({ selectedRoom: roomData });
+      if (roomData) {
+        setter(() => {
+          // Load pending messages from localStorage
+          const pendingMessages = pendingMessagesService.getPendingMessages(
+            roomData._id
+          );
+          const serverMessages = roomData.messages || [];
+
+          // Merge server messages with pending messages
+          const allMessages = [...serverMessages, ...pendingMessages];
+
+          // Sort by createdAt to maintain order
+          allMessages.sort(
+            (a, b) =>
+              new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+          );
+
+          return {
+            selectedRoom: {
+              ...roomData,
+              messages: allMessages,
+            },
+          };
+        });
+
+        // Retry pending messages for this room when user enters
+        const retryPendingMessagesForRoom = () => {
+          const pendingMessages = pendingMessagesService.getPendingMessages(
+            roomData._id
+          );
+
+          // Filter only pending messages that haven't been processed
+          const pendingOnly = pendingMessages.filter(
+            (msg) => msg.status === "pending"
+          );
+
+          pendingOnly.forEach((msg) => {
+            const payload = {
+              roomID: roomData._id,
+              message: msg.message,
+              sender: msg.sender,
+              replayData: msg.replayedTo
+                ? { targetID: msg.replayedTo.msgID, replayedTo: msg.replayedTo }
+                : null,
+              tempId: msg._id,
+            };
+
+            socket.emit(
+              "newMessage",
+              payload,
+              (response: { success: boolean; _id: string }) => {
+                if (response.success) {
+                  setter(
+                    (prev): Partial<GlobalStoreProps> => ({
+                      ...prev,
+                      selectedRoom: prev.selectedRoom
+                        ? {
+                            ...prev.selectedRoom,
+                            messages: prev.selectedRoom.messages.map((m) =>
+                              m._id === msg._id
+                                ? { ...m, _id: response._id, status: "sent" }
+                                : m
+                            ),
+                          }
+                        : prev.selectedRoom,
+                    })
+                  );
+                  pendingMessagesService.removePendingMessage(
+                    roomData._id,
+                    msg._id
+                  );
+                } else {
+                  // Message remains pending, will be retried next time
+                  console.log(
+                    "Retry failed, message remains pending:",
+                    msg._id
+                  );
+                }
+              }
+            );
+          });
+        };
+
+        // Retry pending messages when entering the room
+        retryPendingMessagesForRoom();
+      }
       handleListenerUpdate();
     });
 
@@ -149,10 +235,30 @@ const useConnection = ({
       );
     });
 
+    socket.on("connect_error", () => {
+      setStatus(
+        <span>
+          Connecting
+          <Loading loading="dots" size="xs" classNames="text-white mt-1.5" />
+        </span>
+      );
+    });
+
+    socket.on("error", () => {
+      setStatus(
+        <span>
+          Connecting
+          <Loading loading="dots" size="xs" classNames="text-white mt-1.5" />
+        </span>
+      );
+    });
+
     return () => {
       [
         "connect",
         "disconnect",
+        "connect_error",
+        "error",
         "joining",
         "getRooms",
         "createRoom",
