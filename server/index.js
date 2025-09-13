@@ -10,6 +10,10 @@ const io = new Server(3001, {
     origin: "*",
   },
   pingTimeout: 30000,
+  connectionStateRecovery: {
+    maxDisconnectionDuration: 2 * 60 * 1000,
+    skipMiddlewares: true,
+  },
 });
 
 console.log("Socket server is running on port 3001");
@@ -22,8 +26,11 @@ await connectToDB();
 io.on("connection", (socket) => {
   socket.on(
     "newMessage",
-    async ({ roomID, sender, message, replayData, voiceData = null }) => {
-      let tempID = Date.now();
+    async (
+      { roomID, sender, message, replayData, voiceData = null, tempID },
+      callback
+    ) => {
+      if (!tempID) tempID = Date.now().toString();
 
       const msgData = {
         sender,
@@ -32,22 +39,33 @@ io.on("connection", (socket) => {
         seen: [],
         voiceData,
         createdAt: Date.now(),
+        tempID,
+        status: "sent",
       };
 
-      io.to(roomID).emit("newMessage", {
-        ...msgData,
-        _id: tempID,
-        replayedTo: replayData ? replayData.replayedTo : null,
-      });
+      let newMsg = await MessageSchema.findOne({ tempID });
 
-      try {
-        const newMsg = await MessageSchema.create(msgData);
-
+      if (newMsg) {
+        // Already exists, emit updates
+        io.to(roomID).emit("newMessage", {
+          ...newMsg,
+          replayedTo: replayData ? replayData.replayedTo : null,
+        });
         io.to(roomID).emit("lastMsgUpdate", newMsg);
         io.to(roomID).emit("newMessageIdUpdate", { tempID, _id: newMsg._id });
-        io.to(roomID).emit("updateLastMsgData", { msgData, roomID });
+        io.to(roomID).emit("updateLastMsgData", { msgData: newMsg, roomID });
+        callback({ success: true, _id: newMsg._id });
+      } else {
+        // Create new
+        newMsg = await MessageSchema.create(msgData);
 
-        tempID = null;
+        io.to(roomID).emit("newMessage", {
+          ...newMsg,
+          replayedTo: replayData ? replayData.replayedTo : null,
+        });
+        io.to(roomID).emit("lastMsgUpdate", newMsg);
+        io.to(roomID).emit("newMessageIdUpdate", { tempID, _id: newMsg._id });
+        io.to(roomID).emit("updateLastMsgData", { msgData: newMsg, roomID });
 
         if (replayData) {
           await MessageSchema.findOneAndUpdate(
@@ -62,8 +80,8 @@ io.on("connection", (socket) => {
           { _id: roomID },
           { $push: { messages: newMsg._id } }
         );
-      } catch (error) {
-        console.log(error);
+
+        callback({ success: true, _id: newMsg._id });
       }
     }
   );
