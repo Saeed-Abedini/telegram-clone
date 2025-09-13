@@ -124,7 +124,7 @@ const CreateRoom = () => {
     const roomData: Partial<Room> = {
       name: roomName,
       admins: [myID],
-      avatar: imageUrl as string,
+      avatar: imageUrl as string | undefined,
       participants: [...selectedUsers, myID],
       type: createRoomType,
       creator: myID,

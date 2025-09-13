@@ -1,3 +1,5 @@
+"use client";
+
 import Message from "@/models/message";
 import useGlobalStore, { GlobalStoreProps } from "@/stores/globalStore";
 import useUserStore from "@/stores/userStore";
@@ -13,6 +15,7 @@ import { PiMicrophoneLight } from "react-icons/pi";
 import Loading from "../../modules/ui/Loading";
 import { RiSendPlaneFill } from "react-icons/ri";
 import { v4 as uuidv4 } from "uuid";
+import { voiceBlobStorage } from "@/utils/voiceBlobStorage";
 
 interface Props {
   replayData: Partial<Message> | undefined;
@@ -33,6 +36,7 @@ const VoiceMessageRecorder = ({
   const [isLoading, setIsLoading] = useState(false);
   const [audioURL, setAudioURL] = useState("");
   const [timer, setTimer] = useState(0);
+  const [voiceBlob, setVoiceBlob] = useState<Blob | null>(null);
   const [pendingMessageId, setPendingMessageId] = useState<string | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -110,7 +114,8 @@ const VoiceMessageRecorder = ({
   const createPendingMessage = useCallback(
     (
       voiceData: { src: string; duration: number; playedBy: string[] },
-      tempId: string
+      tempId: string,
+      rawBlob?: Blob
     ) => {
       const localMessage = {
         _id: tempId,
@@ -153,10 +158,14 @@ const VoiceMessageRecorder = ({
         selectedRoom?._id || "",
         localMessage
       );
-
+      // Only persist blob when offline; online paths shouldn't hit IndexedDB
+      const blobToSave = rawBlob || voiceBlob;
+      if (blobToSave && typeof navigator !== "undefined" && !navigator.onLine) {
+        voiceBlobStorage.saveBlob(localMessage._id, blobToSave).catch(() => {});
+      }
       return tempId;
     },
-    [myData, selectedRoom, setter, formattedReplayData]
+    [myData, selectedRoom?._id, formattedReplayData, setter, voiceBlob]
   );
 
   // Send message with retry logic
@@ -208,6 +217,8 @@ const VoiceMessageRecorder = ({
               payload.roomID || "",
               tempId
             );
+            // Cleanup any stored blob for this temp message (defensive)
+            voiceBlobStorage.deleteBlob(tempId).catch(() => {});
             setPendingMessageId(null);
             stopRecording();
           } else {
@@ -237,6 +248,10 @@ const VoiceMessageRecorder = ({
                     : null,
                 })
               );
+              // Persist blob for manual retry if not already saved
+              if (voiceBlob) {
+                voiceBlobStorage.saveBlob(tempId, voiceBlob).catch(() => {});
+              }
               setPendingMessageId(null);
               stopRecording();
             }
@@ -244,7 +259,7 @@ const VoiceMessageRecorder = ({
         }
       );
     },
-    [rooms, setter, stopRecording]
+    [rooms, setter, stopRecording, voiceBlob]
   );
 
   const sendVoiceMessage = useCallback(
@@ -292,11 +307,14 @@ const VoiceMessageRecorder = ({
       myData,
     ]
   );
+
   const uploadVoice = useCallback(
-    async (voiceFile: File) => {
+    async (voiceFile: File, rawBlob?: Blob) => {
       try {
         setIsLoading(true);
         const tempId = uuidv4();
+
+        // Do not persist to IndexedDB when online; we'll save only on offline or failure
 
         // Create pending message immediately
         const voiceData = {
@@ -305,7 +323,7 @@ const VoiceMessageRecorder = ({
           playedBy: [],
         };
 
-        createPendingMessage(voiceData, tempId);
+        createPendingMessage(voiceData, tempId, rawBlob);
         setPendingMessageId(tempId);
 
         // Start upload with progress tracking
@@ -408,6 +426,13 @@ const VoiceMessageRecorder = ({
                 : null,
             })
           );
+          // Persist raw blob for later retry on upload failure
+          const blobForSave = rawBlob || voiceBlob;
+          if (blobForSave) {
+            try {
+              await voiceBlobStorage.saveBlob(tempId, blobForSave);
+            } catch {}
+          }
           setPendingMessageId(null);
           stopRecording();
         }
@@ -415,7 +440,6 @@ const VoiceMessageRecorder = ({
         console.error("Upload failed:", error);
         toaster("error", "Upload failed! Please try again.");
         if (pendingMessageId) {
-          // Mark message as failed
           setter(
             (prev: GlobalStoreProps): Partial<GlobalStoreProps> => ({
               selectedRoom: prev.selectedRoom
@@ -430,17 +454,25 @@ const VoiceMessageRecorder = ({
                 : null,
             })
           );
+          // Persist blob on unexpected error, too
+          if (voiceBlob) {
+            voiceBlobStorage
+              .saveBlob(pendingMessageId, voiceBlob)
+              .catch(() => {});
+          }
+          setPendingMessageId(null);
         }
-        setPendingMessageId(null);
-        stopRecording();
+      } finally {
+        setIsLoading(false);
       }
     },
     [
       createPendingMessage,
       setter,
       sendVoiceMessage,
-      pendingMessageId,
+      voiceBlob,
       stopRecording,
+      pendingMessageId,
     ]
   );
 
@@ -477,7 +509,8 @@ const VoiceMessageRecorder = ({
           );
 
           setAudioURL(url);
-          await uploadVoice(file);
+          setVoiceBlob(audioBlob);
+          await uploadVoice(file, audioBlob);
         }
         audioChunksRef.current = [];
       };

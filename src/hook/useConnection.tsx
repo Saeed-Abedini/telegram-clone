@@ -7,6 +7,8 @@ import { SocketsProps } from "@/stores/useSockets";
 import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
 import { pendingMessagesService } from "@/utils/pendingMessages";
+import { uploadFile as uploadFileWithRetry } from "@/utils";
+import { voiceBlobStorage } from "@/utils/voiceBlobStorage";
 
 interface useConnectionProps {
   selectedRoom: Room | null;
@@ -89,7 +91,7 @@ const useConnection = ({
         });
 
         // Retry pending messages for this room when user enters
-        const retryPendingMessagesForRoom = () => {
+        const retryPendingMessagesForRoom = async () => {
           const pendingMessages = pendingMessagesService.getPendingMessages(
             roomData._id
           );
@@ -99,7 +101,94 @@ const useConnection = ({
             (msg) => msg.status === "pending"
           );
 
-          pendingOnly.forEach((msg) => {
+          for (const msg of pendingOnly) {
+            // Prepare voice data: if src is missing, try to upload from IndexedDB first
+            let preparedVoiceData = msg.voiceData || null;
+            if (
+              preparedVoiceData &&
+              (!preparedVoiceData.src || !preparedVoiceData.src.trim())
+            ) {
+              try {
+                const blob = await voiceBlobStorage.getBlob(
+                  msg.tempId || msg._id
+                );
+                if (!blob) {
+                  // No blob to upload; skip emitting, keep pending
+                  continue;
+                }
+                const file = new File([blob], `voice-retry-${Date.now()}.ogg`, {
+                  type: "audio/ogg",
+                });
+
+                const uploadRes = await uploadFileWithRetry(
+                  file,
+                  (progress) => {
+                    // Update progress in UI for this pending message
+                    setter(
+                      (prev): Partial<GlobalStoreProps> => ({
+                        ...prev,
+                        selectedRoom: prev.selectedRoom
+                          ? {
+                              ...prev.selectedRoom,
+                              messages: prev.selectedRoom.messages.map((m) =>
+                                m._id === msg._id
+                                  ? { ...m, uploadProgress: progress }
+                                  : m
+                              ),
+                            }
+                          : prev.selectedRoom,
+                      })
+                    );
+                  }
+                );
+
+                if (!uploadRes.success || !uploadRes.downloadUrl) {
+                  // Upload failed; keep message pending and try later
+                  continue;
+                }
+
+                preparedVoiceData = {
+                  ...preparedVoiceData,
+                  src: uploadRes.downloadUrl,
+                };
+
+                // Update UI and pending storage with new src and complete progress
+                setter(
+                  (prev): Partial<GlobalStoreProps> => ({
+                    ...prev,
+                    selectedRoom: prev.selectedRoom
+                      ? {
+                          ...prev.selectedRoom,
+                          messages: prev.selectedRoom.messages.map((m) =>
+                            m._id === msg._id
+                              ? {
+                                  ...m,
+                                  voiceData: preparedVoiceData,
+                                  uploadProgress: 100,
+                                }
+                              : m
+                          ),
+                        }
+                      : prev.selectedRoom,
+                  })
+                );
+                const list = pendingMessagesService.getPendingMessages(
+                  roomData._id
+                );
+                pendingMessagesService.savePendingMessages(
+                  roomData._id,
+                  list.map((m) =>
+                    m._id === msg._id
+                      ? { ...m, voiceData: preparedVoiceData }
+                      : m
+                  )
+                );
+              } catch {
+                // Any error in uploading, skip this message for now
+                continue;
+              }
+            }
+
             const payload = {
               roomID: roomData._id,
               message: msg.message,
@@ -109,41 +198,53 @@ const useConnection = ({
                 : null,
               tempId: msg._id,
             };
+            if (preparedVoiceData) {
+              Object.assign(payload, { voiceData: preparedVoiceData });
+            }
 
-            socket.emit(
-              "newMessage",
-              payload,
-              (response: { success: boolean; _id: string }) => {
-                if (response.success) {
-                  setter(
-                    (prev): Partial<GlobalStoreProps> => ({
-                      ...prev,
-                      selectedRoom: prev.selectedRoom
-                        ? {
-                            ...prev.selectedRoom,
-                            messages: prev.selectedRoom.messages.map((m) =>
-                              m._id === msg._id
-                                ? { ...m, _id: response._id, status: "sent" }
-                                : m
-                            ),
-                          }
-                        : prev.selectedRoom,
-                    })
-                  );
-                  pendingMessagesService.removePendingMessage(
-                    roomData._id,
-                    msg._id
-                  );
-                } else {
-                  // Message remains pending, will be retried next time
-                  console.log(
-                    "Retry failed, message remains pending:",
-                    msg._id
-                  );
+            await new Promise<void>((resolve) => {
+              socket.emit(
+                "newMessage",
+                payload,
+                (response: { success: boolean; _id: string }) => {
+                  if (response.success) {
+                    setter(
+                      (prev): Partial<GlobalStoreProps> => ({
+                        ...prev,
+                        selectedRoom: prev.selectedRoom
+                          ? {
+                              ...prev.selectedRoom,
+                              messages: prev.selectedRoom.messages.map((m) =>
+                                m._id === msg._id
+                                  ? {
+                                      ...m,
+                                      _id: response._id,
+                                      status: "sent",
+                                      uploadProgress: undefined,
+                                    }
+                                  : m
+                              ),
+                            }
+                          : prev.selectedRoom,
+                      })
+                    );
+                    pendingMessagesService.removePendingMessage(
+                      roomData._id,
+                      msg._id
+                    );
+                    // Cleanup saved blob if any
+                    voiceBlobStorage
+                      .deleteBlob(msg.tempId || msg._id)
+                      .catch(() => {});
+                  } else {
+                    // Message remains pending, will be retried next time
+                    // No action needed
+                  }
+                  resolve();
                 }
-              }
-            );
-          });
+              );
+            });
+          }
         };
 
         // Retry pending messages when entering the room

@@ -1,6 +1,11 @@
 "use client";
 
-import { copyText, deleteFile, getTimeReportFromDate } from "@/utils";
+import {
+  copyText,
+  deleteFile,
+  getTimeReportFromDate,
+  uploadFile as uploadFileWithRetry,
+} from "@/utils";
 import { GoReply } from "react-icons/go";
 import {
   MdContentCopy,
@@ -32,6 +37,7 @@ import { formatDateByDistance } from "@/utils/Date/formatDateByDistance";
 import { FiSend } from "react-icons/fi";
 import { pendingMessagesService } from "@/utils/pendingMessages";
 import { msgDataProps } from "./Message";
+import { voiceBlobStorage } from "@/utils/voiceBlobStorage";
 
 interface MessageActionsProps {
   isFromMe: boolean;
@@ -55,7 +61,8 @@ const MessageActions = ({ isFromMe, msgData }: MessageActionsProps) => {
   const isUserChannel = selectedRoom?.type === "channel" && !isFromMe;
 
   const retrySend = useCallback(
-    (msg: Message) => {
+    async (msg: Message) => {
+      // Mark as pending in UI
       setter(
         (prev): Partial<GlobalStoreProps> => ({
           selectedRoom: prev.selectedRoom
@@ -69,6 +76,116 @@ const MessageActions = ({ isFromMe, msgData }: MessageActionsProps) => {
         })
       );
 
+      // Ensure voice src exists by uploading from IndexedDB if necessary
+      let preparedVoiceData = msg.voiceData || null;
+      if (
+        preparedVoiceData &&
+        (!preparedVoiceData.src || !preparedVoiceData.src.trim())
+      ) {
+        try {
+          const blob = await voiceBlobStorage.getBlob(msg.tempId || msg._id);
+          if (!blob) {
+            // No blob available to upload, keep as failed and abort retry
+            setter(
+              (prev): Partial<GlobalStoreProps> => ({
+                selectedRoom: prev.selectedRoom
+                  ? {
+                      ...prev.selectedRoom,
+                      messages: prev.selectedRoom.messages.map((m) =>
+                        m._id === msg._id ? { ...m, status: "failed" } : m
+                      ),
+                    }
+                  : null,
+              })
+            );
+            return;
+          }
+
+          const file = new File([blob], `voice-retry-${Date.now()}.ogg`, {
+            type: "audio/ogg",
+          });
+
+          const uploadResult = await uploadFileWithRetry(file, (progress) => {
+            setter(
+              (prev): Partial<GlobalStoreProps> => ({
+                selectedRoom: prev.selectedRoom
+                  ? {
+                      ...prev.selectedRoom,
+                      messages: prev.selectedRoom.messages.map((m) =>
+                        m._id === msg._id
+                          ? { ...m, uploadProgress: progress }
+                          : m
+                      ),
+                    }
+                  : null,
+              })
+            );
+          });
+
+          if (!uploadResult.success || !uploadResult.downloadUrl) {
+            setter(
+              (prev): Partial<GlobalStoreProps> => ({
+                selectedRoom: prev.selectedRoom
+                  ? {
+                      ...prev.selectedRoom,
+                      messages: prev.selectedRoom.messages.map((m) =>
+                        m._id === msg._id ? { ...m, status: "failed" } : m
+                      ),
+                    }
+                  : null,
+              })
+            );
+            return;
+          }
+
+          preparedVoiceData = {
+            ...preparedVoiceData,
+            src: uploadResult.downloadUrl,
+          };
+
+          // Update local UI message and pending storage with new src
+          setter(
+            (prev): Partial<GlobalStoreProps> => ({
+              selectedRoom: prev.selectedRoom
+                ? {
+                    ...prev.selectedRoom,
+                    messages: prev.selectedRoom.messages.map((m) =>
+                      m._id === msg._id
+                        ? {
+                            ...m,
+                            voiceData: preparedVoiceData,
+                            uploadProgress: 100,
+                          }
+                        : m
+                    ),
+                  }
+                : null,
+            })
+          );
+
+          const pending = pendingMessagesService.getPendingMessages(msg.roomID);
+          const updated = pending.map((m) =>
+            m._id === msg._id ? { ...m, voiceData: preparedVoiceData } : m
+          );
+          pendingMessagesService.savePendingMessages(msg.roomID, updated);
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        } catch (e: unknown) {
+          setter(
+            (prev): Partial<GlobalStoreProps> => ({
+              selectedRoom: prev.selectedRoom
+                ? {
+                    ...prev.selectedRoom,
+                    messages: prev.selectedRoom.messages.map((m) =>
+                      m._id === msg._id ? { ...m, status: "failed" } : m
+                    ),
+                  }
+                : null,
+            })
+          );
+          return;
+        }
+      }
+
       const payload = {
         roomID: msg.roomID,
         message: msg.message,
@@ -76,7 +193,7 @@ const MessageActions = ({ isFromMe, msgData }: MessageActionsProps) => {
         replayData: msg.replayedTo
           ? { targetID: msg.replayedTo.msgID, replayedTo: msg.replayedTo }
           : null,
-        voiceData: msg.voiceData,
+        voiceData: preparedVoiceData,
         tempId: msg._id,
       };
 
@@ -115,7 +232,12 @@ const MessageActions = ({ isFromMe, msgData }: MessageActionsProps) => {
                         ...prev.selectedRoom,
                         messages: prev.selectedRoom.messages.map((m) =>
                           m._id === msg._id
-                            ? { ...m, _id: response._id, status: "sent" }
+                            ? {
+                                ...m,
+                                _id: response._id,
+                                status: "sent",
+                                uploadProgress: undefined,
+                              }
                             : m
                         ),
                       }
@@ -126,6 +248,10 @@ const MessageActions = ({ isFromMe, msgData }: MessageActionsProps) => {
                 payload.roomID,
                 msg._id
               );
+              // Cleanup saved blob (if any)
+              voiceBlobStorage
+                .deleteBlob(msg.tempId || msg._id)
+                .catch(() => {});
             } else {
               attempts++;
               const elapsed = Date.now() - startTime;
@@ -181,6 +307,10 @@ const MessageActions = ({ isFromMe, msgData }: MessageActionsProps) => {
         msgData.roomID,
         msgData.tempId
       );
+      // Cleanup any stored voice blob for this temp message
+      voiceBlobStorage
+        .deleteBlob(msgData.tempId || msgData._id)
+        .catch(() => {});
       setter((prev) => ({
         selectedRoom: prev.selectedRoom
           ? {
