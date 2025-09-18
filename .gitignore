@@ -9,9 +9,10 @@
 !.yarn/plugins
 !.yarn/releases
 !.yarn/versions
-
 # testing
 /coverage
+.stfolder
+.stignore
 
 # next.js
 /.next/
