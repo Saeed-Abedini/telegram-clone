@@ -158,10 +158,15 @@ const VoiceMessageRecorder = ({
         selectedRoom?._id || "",
         localMessage
       );
-      // Only persist blob when offline; online paths shouldn't hit IndexedDB
+      // Save blob to IndexedDB when offline OR when message might fail
       const blobToSave = rawBlob || voiceBlob;
-      if (blobToSave && typeof navigator !== "undefined" && !navigator.onLine) {
-        voiceBlobStorage.saveBlob(localMessage._id, blobToSave).catch(() => {});
+      if (blobToSave && typeof navigator !== "undefined") {
+        // Always save blob to IndexedDB for potential retry scenarios
+        voiceBlobStorage
+          .saveBlob(localMessage._id, blobToSave)
+          .catch((error) =>
+            console.error("Failed to save voice blob to IndexedDB:", error)
+          );
       }
       return tempId;
     },
@@ -250,7 +255,11 @@ const VoiceMessageRecorder = ({
               );
               // Persist blob for manual retry if not already saved
               if (voiceBlob) {
-                voiceBlobStorage.saveBlob(tempId, voiceBlob).catch(() => {});
+                voiceBlobStorage
+                  .saveBlob(tempId, voiceBlob)
+                  .catch((error) =>
+                    console.error("Failed to save voice blob for retry:", error)
+                  );
               }
               setPendingMessageId(null);
               stopRecording();
