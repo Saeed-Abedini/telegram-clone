@@ -27,11 +27,9 @@ io.on("connection", (socket) => {
   socket.on(
     "newMessage",
     async (
-      { roomID, sender, message, replayData, voiceData = null, tempID },
+      { roomID, sender, message, replayData, voiceData = null, tempId },
       callback
     ) => {
-      if (!tempID) tempID = Date.now().toString();
-
       const msgData = {
         sender,
         message,
@@ -39,33 +37,56 @@ io.on("connection", (socket) => {
         seen: [],
         voiceData,
         createdAt: Date.now(),
-        tempID,
+        tempId,
         status: "sent",
       };
 
-      let newMsg = await MessageSchema.findOne({ tempID });
+      let newMsg = await MessageSchema.findOne({ tempId }).lean();
 
       if (newMsg) {
         // Already exists, emit updates
-        io.to(roomID).emit("newMessage", {
+        // Send newMessage to all users EXCEPT the sender
+        socket.to(roomID).emit("newMessage", {
           ...newMsg,
           replayedTo: replayData ? replayData.replayedTo : null,
         });
+
+        // Send newMessageIdUpdate ONLY to the sender
+        socket.emit("newMessageIdUpdate", { tempId, _id: newMsg._id });
+
+        // Broadcast other updates to all users
         io.to(roomID).emit("lastMsgUpdate", newMsg);
-        io.to(roomID).emit("newMessageIdUpdate", { tempID, _id: newMsg._id });
-        io.to(roomID).emit("updateLastMsgData", { msgData: newMsg, roomID });
+        io.to(roomID).emit("updateLastMsgData", {
+          msgData: newMsg,
+          roomID,
+        });
         callback({ success: true, _id: newMsg._id });
       } else {
         // Create new
         newMsg = await MessageSchema.create(msgData);
+        // Populate the sender field before sending
+        const populatedMsg = await MessageSchema.findById(newMsg._id)
+          .populate("sender", "name username avatar _id")
+          .lean();
 
-        io.to(roomID).emit("newMessage", {
-          ...newMsg,
+        // Send newMessage to all users EXCEPT the sender (they'll get newMessageIdUpdate)
+        socket.to(roomID).emit("newMessage", {
+          ...populatedMsg,
           replayedTo: replayData ? replayData.replayedTo : null,
         });
-        io.to(roomID).emit("lastMsgUpdate", newMsg);
-        io.to(roomID).emit("newMessageIdUpdate", { tempID, _id: newMsg._id });
-        io.to(roomID).emit("updateLastMsgData", { msgData: newMsg, roomID });
+
+        // Send newMessageIdUpdate ONLY to the sender to update their pending message
+        socket.emit("newMessageIdUpdate", {
+          tempId,
+          _id: populatedMsg._id,
+        });
+
+        // Broadcast lastMsgUpdate to all users
+        io.to(roomID).emit("lastMsgUpdate", populatedMsg);
+        io.to(roomID).emit("updateLastMsgData", {
+          msgData: populatedMsg,
+          roomID,
+        });
 
         if (replayData) {
           await MessageSchema.findOneAndUpdate(
