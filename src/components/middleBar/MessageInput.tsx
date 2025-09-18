@@ -14,6 +14,7 @@ import { scrollToMessage, toaster } from "@/utils";
 import EmojiPicker from "../modules/EmojiPicker";
 import { v4 as uuidv4 } from "uuid"; // Assume uuid is installed or add it
 import { pendingMessagesService } from "@/utils/pendingMessages";
+import { isMobile } from "@/utils/isMobile";
 
 interface Props {
   replayData?: Partial<Message>;
@@ -256,9 +257,10 @@ const MessageInput = ({
   const sendMessage = useCallback(() => {
     const isExistingRoom = userRooms.some((room) => room._id === roomId);
 
+    const tempId = uuidv4(); // Generate tempId
     const payload = {
       roomID: roomId,
-      message: text,
+      message: text.trim().replace(/\n+$/, ""), // Remove only trailing newlines
       sender: myData,
       replayData: replayData
         ? {
@@ -270,7 +272,7 @@ const MessageInput = ({
             },
           }
         : null,
-      tempId: uuidv4(), // Generate tempId
+      tempId: tempId,
     };
 
     if (isExistingRoom) {
@@ -298,7 +300,7 @@ const MessageInput = ({
     } else {
       rooms?.emit("createRoom", {
         newRoomData: selectedRoom,
-        message: { sender: myData, message: text },
+        message: { sender: myData, message: text.trim().replace(/\n+$/, "") }, // Remove only trailing newlines
       });
     }
     cleanUpAfterSendingMsg();
@@ -316,13 +318,14 @@ const MessageInput = ({
 
   // Edit existing message
   const editMessage = useCallback(() => {
-    if (text.trim() === editData?.message?.trim()) {
+    const trimmedText = text.trim();
+    if (trimmedText === editData?.message?.trim()) {
       closeEdit();
       return;
     }
     rooms?.emit("editMessage", {
       msgID: editData?._id,
-      editedMsg: text,
+      editedMsg: trimmedText,
       roomID: roomId,
     });
     cleanUpAfterSendingMsg();
@@ -365,7 +368,7 @@ const MessageInput = ({
   //Updating text in edit mode
   useEffect(() => {
     if (editData?.message) {
-      setText(editData.message.trim());
+      setText(editData.message);
     }
   }, [editData?.message]);
 
@@ -389,7 +392,7 @@ const MessageInput = ({
     }
   }, [roomId, resizeTextArea]);
 
-  //Synchronize text value with localStorage
+  // Synchronize text value with localStorage
   useEffect(() => {
     if (roomId) {
       if (text) {
@@ -405,14 +408,25 @@ const MessageInput = ({
     selectedRoom?.type !== "channel" ||
     selectedRoom.admins.includes(myData._id);
 
-  // Send a message by pressing Enter (if Shift is not held down)
-  const handleKeyUp = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey && text.trim().length) {
-      e.preventDefault();
-      if (editData) {
-        editMessage();
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // On mobile: Enter = newline (like Shift+Enter on desktop)
+    // On desktop: Enter = send message, Shift+Enter = newline
+    const isMobileDevice = isMobile();
+
+    if (e.key === "Enter") {
+      if (isMobileDevice) {
+        // On mobile, Enter should go to the next line.
+        return;
       } else {
-        sendMessage();
+        // in Desktop
+        if (!e.shiftKey && text.trim().replace(/\n+$/, "").length) {
+          e.preventDefault();
+          if (editData) {
+            editMessage();
+          } else {
+            sendMessage();
+          }
+        }
       }
     }
   };
@@ -500,12 +514,12 @@ const MessageInput = ({
               onChange={handleTextChange}
               onContextMenu={(e) => e.stopPropagation()}
               onClick={() => setIsEmojiOpen(false)}
-              onKeyUp={handleKeyUp}
+              onKeyDown={handleKeyDown}
               ref={inputRef}
               className="bg-transparent w-full resize-none outline-none scroll-w-none"
               placeholder="Message"
             />
-            {!editData && !text.trim() && (
+            {!editData && !text.trim().replace(/\n+$/, "") && (
               <MdAttachFile
                 data-aos="zoom-in"
                 className="size-7 cursor-pointer w-fit rotate-[215deg]"
@@ -520,27 +534,50 @@ const MessageInput = ({
             {editData?._id ? (
               <button
                 className={`p-1 cursor-pointer text-white bg-lightBlue flex-center rounded-full ${
-                  !text.trim() ? "opacity-30" : "opacity-100"
+                  !text.trim().replace(/\n+$/, "")
+                    ? "opacity-30"
+                    : "opacity-100"
                 }`}
                 onClick={editMessage}
-                disabled={!text.trim()}
+                disabled={!text.trim().replace(/\n+$/, "")}
               >
                 <MdOutlineDone data-aos="zoom-in" size={20} />
               </button>
             ) : (
               <>
-                {text.trim().length ? (
+                {isMobile() ? (
+                  // توی موبایل، همیشه دکمه ارسال رو نشون بده
                   <RiSendPlaneFill
                     data-aos="zoom-in"
                     onClick={sendMessage}
-                    className="size-7 cursor-pointer text-lightBlue mr-2 rotate-45"
+                    className={`size-7 cursor-pointer text-lightBlue mr-2 rotate-45 ${
+                      text.trim().replace(/\n+$/, "").length
+                        ? "opacity-100"
+                        : "opacity-30"
+                    }`}
+                    style={{
+                      pointerEvents: text.trim().replace(/\n+$/, "").length
+                        ? "auto"
+                        : "none",
+                    }}
                   />
                 ) : (
-                  <VoiceMessageRecorder
-                    replayData={replayData}
-                    closeEdit={closeEdit}
-                    closeReplay={closeReplay}
-                  />
+                  // توی دسکتاپ، مثل قبل کار کنه
+                  <>
+                    {text.trim().replace(/\n+$/, "").length ? (
+                      <RiSendPlaneFill
+                        data-aos="zoom-in"
+                        onClick={sendMessage}
+                        className="size-7 cursor-pointer text-lightBlue mr-2 rotate-45"
+                      />
+                    ) : (
+                      <VoiceMessageRecorder
+                        replayData={replayData}
+                        closeEdit={closeEdit}
+                        closeReplay={closeReplay}
+                      />
+                    )}
+                  </>
                 )}
               </>
             )}

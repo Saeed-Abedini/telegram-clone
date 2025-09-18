@@ -237,7 +237,7 @@ const Message = memo((msgData: MessageModel & msgDataProps) => {
                 <p className="font-vazirBold text-xs break-words text-start line-clamp-1 text-ellipsis">
                   {replayedTo?.username}
                 </p>
-                <p className="font-thin break-words line-clamp-1 text-ellipsis text-left text-xs">
+                <p className="font-thin break-words line-clamp-1 text-ellipsis text-left text-xs whitespace-pre-wrap">
                   {replayedTo?.message || "Voice Message"}
                 </p>
               </div>
@@ -254,7 +254,7 @@ const Message = memo((msgData: MessageModel & msgDataProps) => {
                 />
               </div>
             )}
-            <p dir="auto" className="text-white break-all ">
+            <p dir="auto" className="text-white break-all whitespace-pre-wrap">
               {message}
             </p>
           </div>

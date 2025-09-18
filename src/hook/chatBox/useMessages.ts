@@ -26,9 +26,7 @@ const useMessages = ({
   useEffect(() => {
     const handleNewMessage = (newMsg: Message) => {
       if (newMsg.roomID === roomID) {
-        if (newMsg?.sender?._id) {
-          playRingSound();
-        }
+        playRingSound();
         setter((prev) => ({
           selectedRoom: {
             ...prev.selectedRoom!,
@@ -78,6 +76,7 @@ const useMessages = ({
       tempID: string;
       _id: string;
     }) => {
+      playRingSound();
       setter((prev) => ({
         selectedRoom: {
           ...prev.selectedRoom!,

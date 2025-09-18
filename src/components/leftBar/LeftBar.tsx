@@ -37,7 +37,8 @@ const LeftBar = () => {
   const userId = useUserStore((state) => state._id);
   const { updater, rooms: roomsSocket } = useSockets((state) => state);
   const { setter: userDataUpdater, rooms: userRooms } = useUserStore(
-    (state) => state)
+    (state) => state
+  );
 
   const {
     selectedRoom,
@@ -80,15 +81,16 @@ const LeftBar = () => {
 
   useEffect(() => {
     const handleNewMessage = async (newMsg: Message) => {
-      if (newMsg.roomID !== selectedRoom?._id || !selectedRoom._id) {
+      if (newMsg.roomID !== selectedRoom?._id || !selectedRoom?._id) {
         if (document.visibilityState !== "visible") {
           if (
             "serviceWorker" in navigator &&
-            Notification.permission === "granted") {
+            Notification.permission === "granted"
+          ) {
             const registration = await navigator.serviceWorker.ready;
-            registration.showNotification(newMsg.sender.name, {
-              body: newMsg.message,
-              icon: "/images/favicon.svg",
+            registration.showNotification(newMsg.sender.name || "", {
+              body: newMsg.message || "",
+              icon: newMsg.sender.avatar || "/images/favicon.svg",
               data: { url: window.location.href },
               dir: "auto",
               badge: "/images/favicon-96x96.png",
@@ -174,54 +176,53 @@ const LeftBar = () => {
         {isSearchOpen && <SearchPage closeSearch={handleCloseSearch} />}
 
         {leftBarActiveRoute !== "/settings" && (
+          <div
+            data-aos-duration="400"
+            data-aos="fade-right"
+            id="leftBar-container"
+            className="flex-1 bg-leftBarBg h-full relative scroll-w-none overflow-y-auto "
+          >
             <div
-              data-aos-duration="400"
-              data-aos="fade-right"
-              id="leftBar-container"
-              className="flex-1 bg-leftBarBg h-full relative scroll-w-none overflow-y-auto "
+              className="w-full sticky top-0 bg-leftBarBg border-b border-white/5 h-20 overflow-hidden"
+              style={{ zIndex: 1 }}
             >
-
-          <div
-            className="w-full sticky top-0 bg-leftBarBg border-b border-white/5 h-20 overflow-hidden"
-            style={{ zIndex: 1 }}
-          >
-            <div className="flex items-center justify-between gap-6 mx-3">
-              <div className="flex items-center flex-1 gap-5 mt-3 w-full text-white">
-                <RxHamburgerMenu
-                  size={20}
-                  onClick={handleOpenLeftBarMenu}
-                  className="cursor-pointer"
-                />
-                <h1 className="font-vazirBold mt-0.5">{status}</h1>
-              </div>
-              <BiSearch
-                size={22}
-                onClick={handleOpenSearch}
-                className="cursor-pointer text-white/90 mt-3"
-              />
-            </div>
-            <RoomFolders updateFilterBy={setFilterBy} />
-          </div>
-
-          <div
-            className="flex flex-col overflow-y-auto overflow-x-hidden scroll-w-none w-full"
-            style={{ zIndex: 0 }}
-          >
-            {isPageLoaded ? (
-              sortedRooms.length ? (
-                sortedRooms.map((data) => (
-                  <ChatCard {...data} key={data?._id} />
-                ))
-              ) : (
-                <div className="text-xl text-white font-bold w-full text-center font-vazirBold pt-20">
-                  No chats found
+              <div className="flex items-center justify-between gap-6 mx-3">
+                <div className="flex items-center flex-1 gap-5 mt-3 w-full text-white">
+                  <RxHamburgerMenu
+                    size={20}
+                    onClick={handleOpenLeftBarMenu}
+                    className="cursor-pointer"
+                  />
+                  <h1 className="font-vazirBold mt-0.5">{status}</h1>
                 </div>
-              )
-            ) : (
-              <RoomSkeleton />
-            )}
+                <BiSearch
+                  size={22}
+                  onClick={handleOpenSearch}
+                  className="cursor-pointer text-white/90 mt-3"
+                />
+              </div>
+              <RoomFolders updateFilterBy={setFilterBy} />
+            </div>
+
+            <div
+              className="flex flex-col overflow-y-auto overflow-x-hidden scroll-w-none w-full"
+              style={{ zIndex: 0 }}
+            >
+              {isPageLoaded ? (
+                sortedRooms.length ? (
+                  sortedRooms.map((data) => (
+                    <ChatCard {...data} key={data?._id} />
+                  ))
+                ) : (
+                  <div className="text-xl text-white font-bold w-full text-center font-vazirBold pt-20">
+                    No chats found
+                  </div>
+                )
+              ) : (
+                <RoomSkeleton />
+              )}
+            </div>
           </div>
-        </div>
         )}
         <audio
           ref={ringAudioRef}
@@ -231,7 +232,6 @@ const LeftBar = () => {
       </div>
     </>
   );
-
 };
 
 export default LeftBar;
