@@ -545,39 +545,18 @@ const MessageInput = ({
               </button>
             ) : (
               <>
-                {isMobile() ? (
-                  // توی موبایل، همیشه دکمه ارسال رو نشون بده
+                {text.trim().replace(/\n+$/, "").length ? (
                   <RiSendPlaneFill
                     data-aos="zoom-in"
                     onClick={sendMessage}
-                    className={`size-7 cursor-pointer text-lightBlue mr-2 rotate-45 ${
-                      text.trim().replace(/\n+$/, "").length
-                        ? "opacity-100"
-                        : "opacity-30"
-                    }`}
-                    style={{
-                      pointerEvents: text.trim().replace(/\n+$/, "").length
-                        ? "auto"
-                        : "none",
-                    }}
+                    className="size-7 cursor-pointer text-lightBlue mr-2 rotate-45"
                   />
                 ) : (
-                  // توی دسکتاپ، مثل قبل کار کنه
-                  <>
-                    {text.trim().replace(/\n+$/, "").length ? (
-                      <RiSendPlaneFill
-                        data-aos="zoom-in"
-                        onClick={sendMessage}
-                        className="size-7 cursor-pointer text-lightBlue mr-2 rotate-45"
-                      />
-                    ) : (
-                      <VoiceMessageRecorder
-                        replayData={replayData}
-                        closeEdit={closeEdit}
-                        closeReplay={closeReplay}
-                      />
-                    )}
-                  </>
+                  <VoiceMessageRecorder
+                    replayData={replayData}
+                    closeEdit={closeEdit}
+                    closeReplay={closeReplay}
+                  />
                 )}
               </>
             )}
